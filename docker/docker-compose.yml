@@ -1,16 +1,34 @@
 services:
   postgres:
     image: postgres:17
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: openportalkit
-      POSTGRES_USER: openportalkit
-      POSTGRES_PASSWORD: openportalkit_dev
+      POSTGRES_DB: ${POSTGRES_DB:-openportalkit}
+      POSTGRES_USER: ${POSTGRES_USER:-openportalkit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openportalkit_dev}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - openportalkit-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:8
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - openportalkit-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  openportalkit-postgres:
+  openportalkit-redis:

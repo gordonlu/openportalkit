@@ -1,3 +1,4 @@
+using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
@@ -15,6 +16,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddRazorPages();
 builder.Services.AddHealthChecks();
+builder.Services.Configure<OpenPortalKitStorageOptions>(
+    builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
 
 var app = builder.Build();
 
@@ -47,6 +50,23 @@ app.MapGet("/admin/system/modules", () => new[]
     DashboardModule.Descriptor,
     AuditModule.Descriptor,
     JobsModule.Descriptor
+});
+app.MapGet("/admin/system/storage", (IConfiguration configuration) =>
+{
+    var storage = configuration
+        .GetSection(OpenPortalKitStorageOptions.SectionName)
+        .Get<OpenPortalKitStorageOptions>() ?? new OpenPortalKitStorageOptions();
+
+    return new
+    {
+        storage.Provider,
+        storage.PrimaryConnectionStringName,
+        PrimaryConnectionConfigured = !string.IsNullOrWhiteSpace(
+            configuration.GetConnectionString(storage.PrimaryConnectionStringName)),
+        storage.CacheConnectionStringName,
+        CacheConnectionConfigured = !string.IsNullOrWhiteSpace(
+            configuration.GetConnectionString(storage.CacheConnectionStringName))
+    };
 });
 app.MapRazorPages()
    .WithStaticAssets();

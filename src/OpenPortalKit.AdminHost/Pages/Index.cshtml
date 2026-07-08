@@ -5,11 +5,230 @@
 }
 
 <section class="opk-admin-shell">
-    <h1>OpenPortalKit Admin</h1>
-    <p>Initial administrative host for content, workflow, structured data, audit, dashboard, search, and AgentSEO operations.</p>
+    <aside class="opk-sidebar" aria-label="Admin navigation">
+        <a class="opk-brand" asp-page="/Index" aria-label="OpenPortalKit Admin home">
+            <span class="opk-brand-mark">OP</span>
+            <span>
+                <strong>OpenPortalKit</strong>
+                <small>Admin</small>
+            </span>
+        </a>
 
-    <ul>
-        <li><a href="/health">Health check</a></li>
-        <li><a href="/admin/system/modules">Module registry</a></li>
-    </ul>
+        <nav class="opk-nav">
+            <a class="opk-nav-link is-active" href="#dashboard"><span class="opk-nav-icon"></span>Dashboard</a>
+            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
+            <a class="opk-nav-link" href="#workflow"><span class="opk-nav-icon"></span>Workflow</a>
+            <a class="opk-nav-link" href="#data"><span class="opk-nav-icon"></span>Data</a>
+            <a class="opk-nav-link" href="#search"><span class="opk-nav-icon"></span>Search</a>
+            <a class="opk-nav-link" href="#agent-access"><span class="opk-nav-icon"></span>Agent Access</a>
+            <a class="opk-nav-link" href="#audit"><span class="opk-nav-icon"></span>Audit</a>
+            <a class="opk-nav-link" href="#jobs"><span class="opk-nav-icon"></span>Jobs</a>
+            <a class="opk-nav-link" href="#settings"><span class="opk-nav-icon"></span>Settings</a>
+        </nav>
+
+        <div class="opk-sidebar-status">
+            <span class="opk-status-dot is-ok"></span>
+            <span>Core boundary clean</span>
+        </div>
+    </aside>
+
+    <div class="opk-workspace">
+        <header class="opk-topbar">
+            <div>
+                <h1>Publishing Operations</h1>
+                <p>Content, data, public outputs, workflow, and agent readiness.</p>
+            </div>
+            <div class="opk-topbar-actions">
+                <a class="opk-button opk-button-secondary" href="/health">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7.5 10.8 16.7 6.5 12.4" /></svg>
+                    Health
+                </a>
+                <a class="opk-button opk-button-primary" href="/admin/system/modules">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+                    Modules
+                </a>
+            </div>
+        </header>
+
+        <section class="opk-metric-grid" aria-label="Publishing health summary">
+            <article class="opk-metric">
+                <span class="opk-metric-label">Public readiness</span>
+                <strong>84%</strong>
+                <span class="opk-trend is-good">+6 this week</span>
+            </article>
+            <article class="opk-metric">
+                <span class="opk-metric-label">Review queue</span>
+                <strong>12</strong>
+                <span class="opk-trend is-warn">4 waiting approval</span>
+            </article>
+            <article class="opk-metric">
+                <span class="opk-metric-label">Data freshness</span>
+                <strong>92%</strong>
+                <span class="opk-trend is-good">All critical views current</span>
+            </article>
+            <article class="opk-metric">
+                <span class="opk-metric-label">Job health</span>
+                <strong>98%</strong>
+                <span class="opk-trend is-good">1 retry pending</span>
+            </article>
+        </section>
+
+        <section class="opk-dashboard-grid" id="dashboard">
+            <div class="opk-panel opk-panel-wide" id="content">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Publishing Queue</h2>
+                        <p>Items closest to public output changes.</p>
+                    </div>
+                    <div class="opk-segmented" aria-label="Queue filter">
+                        <button type="button" class="is-selected">Review</button>
+                        <button type="button">Scheduled</button>
+                        <button type="button">Drafts</button>
+                    </div>
+                </div>
+
+                <div class="opk-table-wrap">
+                    <table class="opk-table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Owner</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <strong>Product documentation refresh</strong>
+                                    <span>Canonical metadata ready</span>
+                                </td>
+                                <td>Page</td>
+                                <td><span class="opk-chip is-review">Review</span></td>
+                                <td>Editorial</td>
+                                <td>08:42</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>Research portal release notes</strong>
+                                    <span>Markdown snapshot queued</span>
+                                </td>
+                                <td>Report</td>
+                                <td><span class="opk-chip is-approved">Approved</span></td>
+                                <td>Publishing</td>
+                                <td>Yesterday</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>Service availability announcement</strong>
+                                    <span>RSS and sitemap pending</span>
+                                </td>
+                                <td>Announcement</td>
+                                <td><span class="opk-chip is-scheduled">Scheduled</span></td>
+                                <td>Operations</td>
+                                <td>Mon</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="opk-panel" id="agent-access">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Output Readiness</h2>
+                        <p>Human and machine-readable forms.</p>
+                    </div>
+                </div>
+                <ul class="opk-check-list">
+                    <li><span class="opk-status-dot is-ok"></span>HTML published</li>
+                    <li><span class="opk-status-dot is-ok"></span>JSON snapshots</li>
+                    <li><span class="opk-status-dot is-ok"></span>Markdown snapshots</li>
+                    <li><span class="opk-status-dot is-warn"></span>RSS refresh queued</li>
+                    <li><span class="opk-status-dot is-ok"></span>Sitemap current</li>
+                </ul>
+            </div>
+
+            <div class="opk-panel" id="data">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Data Freshness</h2>
+                        <p>Structured publishing traces.</p>
+                    </div>
+                </div>
+                <div class="opk-stack">
+                    <div class="opk-data-row">
+                        <span>Course catalog</span>
+                        <strong>Current</strong>
+                    </div>
+                    <div class="opk-data-row">
+                        <span>Research indicators</span>
+                        <strong>2h old</strong>
+                    </div>
+                    <div class="opk-data-row">
+                        <span>Activity schedule</span>
+                        <strong>Current</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="opk-panel" id="audit">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Recent Audit</h2>
+                        <p>Public-output-changing actions.</p>
+                    </div>
+                </div>
+                <ol class="opk-timeline">
+                    <li>
+                        <span>09:12</span>
+                        <strong>ContentPublished</strong>
+                        <p>Public detail page and snapshots updated.</p>
+                    </li>
+                    <li>
+                        <span>08:58</span>
+                        <strong>WorkflowApproved</strong>
+                        <p>Review queue item moved to publish-ready.</p>
+                    </li>
+                    <li>
+                        <span>08:21</span>
+                        <strong>DatasetPublished</strong>
+                        <p>Public records endpoint refreshed.</p>
+                    </li>
+                </ol>
+            </div>
+
+            <div class="opk-panel" id="jobs">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Background Jobs</h2>
+                        <p>Outbox and public output processing.</p>
+                    </div>
+                </div>
+                <div class="opk-job-list">
+                    <div><span>Search index</span><span class="opk-chip is-approved">Done</span></div>
+                    <div><span>Snapshot generator</span><span class="opk-chip is-review">Running</span></div>
+                    <div><span>Sitemap refresh</span><span class="opk-chip is-scheduled">Queued</span></div>
+                </div>
+            </div>
+
+            <div class="opk-panel" id="workflow">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Module Registry</h2>
+                        <p>Loaded boundaries and public outputs.</p>
+                    </div>
+                </div>
+                <div class="opk-module-grid">
+                    <span>Content</span>
+                    <span>Data</span>
+                    <span>SEO</span>
+                    <span>Search</span>
+                    <span>AgentAccess</span>
+                    <span>Audit</span>
+                </div>
+            </div>
+        </section>
+    </div>
 </section>
