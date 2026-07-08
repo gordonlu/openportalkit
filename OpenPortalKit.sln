@@ -51,6 +51,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenPortalKit.Modules.Data.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenPortalKit.Modules.Search.Tests", "tests\OpenPortalKit.Modules.Search.Tests\OpenPortalKit.Modules.Search.Tests.csproj", "{4154F5D0-9ED5-4421-B500-98CC9ECAE036}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenPortalKit.Modules.Dashboard.Tests", "tests\OpenPortalKit.Modules.Dashboard.Tests\OpenPortalKit.Modules.Dashboard.Tests.csproj", "{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -325,6 +327,18 @@ Global
 		{4154F5D0-9ED5-4421-B500-98CC9ECAE036}.Release|x64.Build.0 = Release|Any CPU
 		{4154F5D0-9ED5-4421-B500-98CC9ECAE036}.Release|x86.ActiveCfg = Release|Any CPU
 		{4154F5D0-9ED5-4421-B500-98CC9ECAE036}.Release|x86.Build.0 = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|x64.Build.0 = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Debug|x86.Build.0 = Debug|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|x64.ActiveCfg = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|x64.Build.0 = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|x86.ActiveCfg = Release|Any CPU
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -352,5 +366,6 @@ Global
 		{202D438A-8B21-425B-A85B-370DCC3EDABB} = {3F0DE870-D9C8-48B2-99B3-0C6523901E16}
 		{01211F5D-8DB6-4366-A7BE-E9267F249410} = {3F0DE870-D9C8-48B2-99B3-0C6523901E16}
 		{4154F5D0-9ED5-4421-B500-98CC9ECAE036} = {3F0DE870-D9C8-48B2-99B3-0C6523901E16}
+		{1B67BCBD-8423-4462-BA3E-FA5DADE2F28F} = {3F0DE870-D9C8-48B2-99B3-0C6523901E16}
 	EndGlobalSection
 EndGlobal

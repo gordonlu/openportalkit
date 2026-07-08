@@ -274,6 +274,35 @@ a:focus-visible {
   color: var(--opk-warn);
 }
 
+.opk-alert-strip {
+  display: grid;
+  gap: 8px;
+  margin: -4px 0 18px;
+}
+
+.opk-alert-link {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid rgba(183, 121, 31, 0.28);
+  border-radius: 8px;
+  background: #fff9ee;
+  color: #6f4711;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.opk-alert-link:hover {
+  border-color: rgba(183, 121, 31, 0.48);
+  color: #4d310b;
+}
+
+.opk-alert-link.is-critical {
+  border-color: rgba(189, 59, 59, 0.28);
+  background: #fff4f4;
+  color: #8d2525;
+}
+
 .opk-dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr);
@@ -335,7 +364,7 @@ a:focus-visible {
 
 .opk-table {
   width: 100%;
-  min-width: 640px;
+  min-width: 560px;
   border-collapse: collapse;
 }
 

@@ -50,7 +50,7 @@
             </div>
         </header>
 
-        <section class="opk-metric-grid" aria-label="Publishing health summary">
+        <section class="opk-metric-grid" id="dashboard-metrics" aria-label="Publishing health summary">
             <article class="opk-metric">
                 <span class="opk-metric-label">Public readiness</span>
                 <strong>84%</strong>
@@ -72,6 +72,8 @@
                 <span class="opk-trend is-good">1 retry pending</span>
             </article>
         </section>
+
+        <section class="opk-alert-strip" id="dashboard-alerts" aria-label="Actionable dashboard alerts" hidden></section>
 
         <section class="opk-dashboard-grid" id="dashboard">
             <div class="opk-panel opk-panel-wide" id="content">
@@ -232,3 +234,98 @@
         </section>
     </div>
 </section>
+
+<script>
+    (() => {
+        const metricGrid = document.getElementById("dashboard-metrics");
+        const alertStrip = document.getElementById("dashboard-alerts");
+        const areaNames = {
+            0: "Site operations",
+            1: "Content",
+            2: "Data publishing",
+            3: "Agent readiness",
+            4: "System health"
+        };
+
+        const valueText = (metric) => {
+            if (metric.unit === "percent") {
+                return `${metric.value}%`;
+            }
+
+            if (metric.unit === "score") {
+                return `${metric.value}`;
+            }
+
+            return `${metric.value}`;
+        };
+
+        const detailText = (metric) => {
+            const areaName = areaNames[metric.area] || "Dashboard";
+            return `${areaName} - ${metric.unit}`;
+        };
+
+        const renderMetrics = (cards) => {
+            const metrics = cards
+                .flatMap((card) => card.metrics || [])
+                .slice(0, 4);
+
+            if (metrics.length === 0) {
+                return;
+            }
+
+            metricGrid.replaceChildren(...metrics.map((metric) => {
+                const article = document.createElement("article");
+                article.className = "opk-metric";
+
+                const label = document.createElement("span");
+                label.className = "opk-metric-label";
+                label.textContent = metric.label;
+
+                const value = document.createElement("strong");
+                value.textContent = valueText(metric);
+
+                const detail = document.createElement("span");
+                detail.className = metric.value > 0 ? "opk-trend is-good" : "opk-trend";
+                detail.textContent = detailText(metric);
+
+                article.append(label, value, detail);
+                return article;
+            }));
+        };
+
+        const renderAlerts = (cards) => {
+            const alerts = cards
+                .flatMap((card) => card.alerts || [])
+                .filter((alert) => alert.isActionable)
+                .slice(0, 3);
+
+            if (alerts.length === 0) {
+                alertStrip.hidden = true;
+                return;
+            }
+
+            alertStrip.hidden = false;
+            alertStrip.replaceChildren(...alerts.map((alert) => {
+                const link = document.createElement("a");
+                link.className = alert.level >= 2 ? "opk-alert-link is-critical" : "opk-alert-link";
+                link.href = alert.actionHref;
+                link.textContent = alert.message;
+                return link;
+            }));
+        };
+
+        fetch("/admin/dashboard/summary")
+            .then((response) => response.ok ? response.json() : null)
+            .then((summary) => {
+                if (!summary || !Array.isArray(summary.cards)) {
+                    return;
+                }
+
+                renderMetrics(summary.cards);
+                renderAlerts(summary.cards);
+            })
+            .catch(() => {
+                alertStrip.hidden = true;
+            });
+    })();
+</script>

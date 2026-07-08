@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Data\OpenPortalKit.Modules.Data.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

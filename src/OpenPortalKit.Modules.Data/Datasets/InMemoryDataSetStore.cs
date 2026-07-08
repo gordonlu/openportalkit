@@ -20,6 +20,21 @@ public sealed class InMemoryDataSetStore : IDataSetStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<DataSet>> ListDataSetsAsync(
+        Guid? siteId = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_syncRoot)
+        {
+            return Task.FromResult<IReadOnlyList<DataSet>>(_dataSets
+                .Where(dataSet => siteId is null || dataSet.SiteId == siteId)
+                .OrderBy(dataSet => dataSet.Code, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+        }
+    }
+
     public Task<DataSet?> FindDataSetByCodeAsync(
         Guid siteId,
         string code,
