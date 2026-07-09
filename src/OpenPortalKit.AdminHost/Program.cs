@@ -35,6 +35,7 @@ builder.Services.AddSingleton<IContentItemStore, InMemoryContentItemStore>();
 builder.Services.AddSingleton<IDataSetStore, InMemoryDataSetStore>();
 builder.Services.AddSingleton<IDataRecordStore, InMemoryDataRecordStore>();
 builder.Services.AddSingleton<IOutboxMessageStore, InMemoryOutboxMessageStore>();
+builder.Services.AddSingleton<IAgentReadinessSignalProvider, ContentAgentReadinessSignalProvider>();
 var dashboardPostgres = builder.Configuration
     .GetSection(DashboardPostgresStorageOptions.SectionName)
     .Get<DashboardPostgresStorageOptions>() ?? new DashboardPostgresStorageOptions();
@@ -60,8 +61,20 @@ builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
     new AnalyticsEventFactory(provider.GetRequiredService<IOptions<AnalyticsPrivacyOptions>>().Value));
 builder.Services.AddSingleton<IDashboardSignalSource, SiteOperationsDashboardSignalSource>();
 builder.Services.AddSingleton<IDashboardSignalSource, ContentDashboardSignalSource>();
-builder.Services.AddSingleton<IDashboardSignalSource, DataPublishingDashboardSignalSource>();
+builder.Services.AddSingleton<IDashboardSignalSource>(provider =>
+    new DataPublishingDashboardSignalSource(
+        provider.GetRequiredService<IDataSetStore>(),
+        provider.GetRequiredService<IDataRecordStore>(),
+        eventStore: provider.GetRequiredService<IAnalyticsEventStore>()));
+builder.Services.AddSingleton<IDashboardSignalSource, AgentReadinessDashboardSignalSource>();
+builder.Services.AddSingleton<IDashboardSignalSource, SystemRuntimeDashboardSignalSource>();
 builder.Services.AddSingleton<IDashboardSignalSource, OutboxDashboardSignalSource>();
+foreach (var probe in CreateDefaultHealthProbes(builder.Configuration))
+{
+    builder.Services.AddSingleton<IDashboardHealthProbe>(probe);
+}
+
+builder.Services.AddSingleton<IDashboardSignalSource, SystemHealthDashboardSignalSource>();
 builder.Services.AddSingleton<DashboardAggregator>();
 builder.Services.AddSingleton(provider =>
     provider.GetRequiredService<IOptions<DashboardSummaryOptions>>().Value);
@@ -269,6 +282,61 @@ static string ResolveSessionId(AnalyticsEventCaptureRequest request, HttpContext
     var userAgent = context.Request.Headers.UserAgent.ToString();
     var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     return remoteIp + ":" + userAgent;
+}
+
+static IReadOnlyList<IDashboardHealthProbe> CreateDefaultHealthProbes(IConfiguration configuration)
+{
+    var storage = configuration
+        .GetSection(OpenPortalKitStorageOptions.SectionName)
+        .Get<OpenPortalKitStorageOptions>() ?? new OpenPortalKitStorageOptions();
+    var primaryConnectionConfigured = !string.IsNullOrWhiteSpace(
+        configuration.GetConnectionString(storage.PrimaryConnectionStringName));
+    var cacheConnectionConfigured = !string.IsNullOrWhiteSpace(
+        configuration.GetConnectionString(storage.CacheConnectionStringName));
+    var usesInMemoryStorage = string.Equals(storage.Provider, "InMemory", StringComparison.OrdinalIgnoreCase);
+
+    return new IDashboardHealthProbe[]
+    {
+        new StaticDashboardHealthProbe(
+            "database",
+            "Database",
+            usesInMemoryStorage || primaryConnectionConfigured
+                ? DashboardHealthProbeStatus.Healthy
+                : DashboardHealthProbeStatus.Unhealthy,
+            TimeSpan.Zero,
+            usesInMemoryStorage || primaryConnectionConfigured
+                ? "Primary data store is configured."
+                : "Primary database connection is not configured.",
+            "/admin/system/storage"),
+        new StaticDashboardHealthProbe(
+            "redis",
+            "Redis",
+            cacheConnectionConfigured
+                ? DashboardHealthProbeStatus.Healthy
+                : DashboardHealthProbeStatus.Degraded,
+            TimeSpan.Zero,
+            cacheConnectionConfigured
+                ? "Cache connection is configured."
+                : "Redis cache is not configured; in-memory cache behavior is expected for local development.",
+            "/admin/system/storage"),
+        new StaticDashboardHealthProbe(
+            "search",
+            "Search provider",
+            DashboardHealthProbeStatus.Healthy,
+            TimeSpan.Zero,
+            "Search module is registered."),
+        new StaticDashboardHealthProbe(
+            "storage",
+            "Object storage",
+            usesInMemoryStorage || primaryConnectionConfigured
+                ? DashboardHealthProbeStatus.Healthy
+                : DashboardHealthProbeStatus.Degraded,
+            TimeSpan.Zero,
+            usesInMemoryStorage || primaryConnectionConfigured
+                ? "Storage provider is configured."
+                : "Persistent storage is not fully configured.",
+            "/admin/system/storage")
+    };
 }
 
 public sealed record AnalyticsEventCaptureRequest(

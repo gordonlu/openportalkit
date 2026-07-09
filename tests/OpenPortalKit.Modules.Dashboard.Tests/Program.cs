@@ -20,12 +20,18 @@ var tests = new (string Name, Func<Task> Run)[]
     ("data dashboard source reports freshness and traceability", DataDashboardSourceReportsFreshnessAndTraceability),
     ("outbox dashboard source reports backlog age", OutboxDashboardSourceReportsBacklogAge),
     ("site operations dashboard source summarizes privacy events", SiteOperationsDashboardSourceSummarizesPrivacyEvents),
+    ("content agent readiness provider derives public page signals", ContentAgentReadinessProviderDerivesPublicPageSignals),
+    ("agent readiness dashboard source reports readiness and agent traffic", AgentReadinessDashboardSourceReportsReadinessAndAgentTraffic),
+    ("system runtime dashboard source reports operational events", SystemRuntimeDashboardSourceReportsOperationalEvents),
+    ("system health dashboard source reports dependency status", SystemHealthDashboardSourceReportsDependencyStatus),
     ("dashboard summary service reuses fresh snapshot", DashboardSummaryServiceReusesFreshSnapshot),
     ("prometheus exporter emits dashboard metrics", PrometheusExporterEmitsDashboardMetrics),
     ("dashboard telemetry publisher emits meter measurements", DashboardTelemetryPublisherEmitsMeterMeasurements),
     ("postgres migration preserves dashboard privacy and indexes", PostgresMigrationPreservesDashboardPrivacyAndIndexes),
     ("postgres store SQL preserves dashboard privacy", PostgresStoreSqlPreservesDashboardPrivacy),
-    ("admin dashboard postgres storage is explicitly configurable", AdminDashboardPostgresStorageIsExplicitlyConfigurable)
+    ("admin dashboard postgres storage is explicitly configurable", AdminDashboardPostgresStorageIsExplicitlyConfigurable),
+    ("admin dashboard registers R7 signal sources", AdminDashboardRegistersR7SignalSources),
+    ("api host captures public analytics runtime events", ApiHostCapturesPublicAnalyticsRuntimeEvents)
 };
 
 var failed = 0;
@@ -192,6 +198,9 @@ static async Task ContentDashboardSourceAggregatesPublishingState()
     var siteId = Guid.NewGuid();
     var store = new InMemoryContentItemStore();
     var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    var contentTypeId = Guid.NewGuid();
+    var authorId = Guid.NewGuid();
+    var categoryId = Guid.NewGuid();
 
     await store.AddAsync(Content(
         siteId,
@@ -200,7 +209,11 @@ static async Task ContentDashboardSourceAggregatesPublishingState()
         observedAt.AddHours(-2),
         publishedAt: observedAt.AddHours(-1),
         summary: "Ready",
-        coverAssetId: Guid.NewGuid()));
+        coverAssetId: Guid.NewGuid(),
+        source: "editorial",
+        contentTypeId: contentTypeId,
+        authorId: authorId,
+        categoryId: categoryId));
     await store.AddAsync(Content(
         siteId,
         "published-stale",
@@ -208,7 +221,10 @@ static async Task ContentDashboardSourceAggregatesPublishingState()
         observedAt.AddDays(-120),
         publishedAt: observedAt.AddDays(-120),
         summary: "",
-        coverAssetId: null));
+        coverAssetId: null,
+        contentTypeId: contentTypeId,
+        authorId: authorId,
+        categoryId: categoryId));
     await store.AddAsync(Content(siteId, "draft", ContentPublicationStatus.Draft, observedAt.AddMinutes(-10)));
     await store.AddAsync(Content(siteId, "review", ContentPublicationStatus.Review, observedAt.AddMinutes(-5)));
     await store.AddAsync(Content(siteId, "archived", ContentPublicationStatus.Archived, observedAt.AddDays(-3)));
@@ -221,13 +237,20 @@ static async Task ContentDashboardSourceAggregatesPublishingState()
 
     var signals = await source.CollectAsync();
 
-    Assert.Equal(9, signals.Metrics.Count);
+    Assert.Equal(14, signals.Metrics.Count);
     Assert.Equal(1, Value(signals, "content.reviewQueue"));
     Assert.Equal(1, Value(signals, "content.publishedToday"));
     Assert.Equal(1, Value(signals, "content.staleCount"));
+    Assert.Equal(1, Value(signals, "content.missingSeoMetadata"));
     Assert.Equal(1, Value(signals, "content.missingSummary"));
     Assert.Equal(1, Value(signals, "content.missingCover"));
+    Assert.Equal(1, Value(signals, "content.missingAgentSnapshots"));
+    Assert.Equal(2, Value(signals, "content.topContentTypeCount"));
+    Assert.Equal(2, Value(signals, "content.topAuthorCount"));
+    Assert.Equal(2, Value(signals, "content.topCategoryCount"));
     Assert.True(signals.Alerts.Any(alert => alert.Code == "content.stale"), "Expected stale content alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "content.seoMetadata"), "Expected SEO metadata alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "content.agentSnapshots"), "Expected AgentSEO snapshot alert.");
 }
 
 static async Task DataDashboardSourceReportsFreshnessAndTraceability()
@@ -235,6 +258,11 @@ static async Task DataDashboardSourceReportsFreshnessAndTraceability()
     var siteId = Guid.NewGuid();
     var dataSetStore = new InMemoryDataSetStore();
     var recordStore = new InMemoryDataRecordStore();
+    var eventStore = new InMemoryAnalyticsEventStore();
+    var factory = new AnalyticsEventFactory(new AnalyticsPrivacyOptions
+    {
+        SessionHashSalt = "data-test"
+    });
     var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
     var currentSet = DataSet(siteId, "current", true, observedAt);
     var staleSet = DataSet(siteId, "stale", true, observedAt);
@@ -249,22 +277,77 @@ static async Task DataDashboardSourceReportsFreshnessAndTraceability()
     await recordStore.UpsertAsync(Record(staleSet.Id, "b", new DateOnly(2026, 5, 1), ""));
     await recordStore.UpsertAsync(Record(privateSet.Id, "c", new DateOnly(2026, 5, 1), "private"));
     await recordStore.UpsertAsync(Record(otherSiteSet.Id, "d", new DateOnly(2026, 7, 8), "other"));
+    await eventStore.AddAsync(factory.Create(
+        "site-1",
+        "data_import",
+        "/admin/data/imports/current",
+        "import-a",
+        observedAt.AddMinutes(-20),
+        metadata: new Dictionary<string, string>
+        {
+            ["status"] = "failed",
+            ["quality_status"] = "failed"
+        }));
+    await eventStore.AddAsync(factory.Create(
+        "site-1",
+        "api_request",
+        "/api/public/datasets/current",
+        "session-a",
+        observedAt.AddMinutes(-10),
+        metadata: new Dictionary<string, string>
+        {
+            ["status_code"] = "200",
+            ["dataset_code"] = "current"
+        }));
+    await eventStore.AddAsync(factory.Create(
+        "site-1",
+        "api_request",
+        "/api/public/datasets/current/export.csv",
+        "session-b",
+        observedAt.AddMinutes(-8),
+        metadata: new Dictionary<string, string>
+        {
+            ["status_code"] = "200",
+            ["dataset_code"] = "current"
+        }));
+    await eventStore.AddAsync(factory.Create(
+        "site-1",
+        "dataset_export",
+        "/api/public/datasets/stale/export.csv",
+        "session-c",
+        observedAt.AddMinutes(-7),
+        metadata: new Dictionary<string, string>
+        {
+            ["dataset_code"] = "stale"
+        }));
 
     var source = new DataPublishingDashboardSignalSource(
         dataSetStore,
         recordStore,
         siteId,
         staleAfterDays: 30,
-        clock: () => observedAt);
+        clock: () => observedAt,
+        eventStore: eventStore);
 
     var signals = await source.CollectAsync();
 
     Assert.Equal(3, Value(signals, "data.datasetCount"));
     Assert.Equal(2, Value(signals, "data.publicDatasetCount"));
     Assert.Equal(3, Value(signals, "data.recordCount"));
+    Assert.Equal(3, Value(signals, "data.importBatchCount"));
+    Assert.Equal(3, Value(signals, "data.importSuccessCount"));
+    Assert.Equal(1, Value(signals, "data.importFailureCount"));
+    Assert.Equal(1, Value(signals, "data.qualityFailureCount"));
     Assert.Equal(1, Value(signals, "data.staleDatasetCount"));
     Assert.Equal(1, Value(signals, "data.missingSourceCount"));
+    Assert.Equal(0, Value(signals, "data.missingAsOfDateCount"));
+    Assert.Equal(1, Value(signals, "data.latestSnapshotStatus"));
+    Assert.Equal(2, Value(signals, "data.datasetApiRequestCount"));
+    Assert.Equal(2, Value(signals, "data.datasetExportCount"));
+    Assert.Equal(1, Value(signals, "data.topDatasetRecordCount"));
+    Assert.Equal(2, Value(signals, "data.topDatasetRequestCount"));
     Assert.True(signals.Alerts.Any(alert => alert.Code == "data.source"), "Expected missing source alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "data.importFailures"), "Expected import failure alert.");
 }
 
 static async Task OutboxDashboardSourceReportsBacklogAge()
@@ -317,34 +400,69 @@ static async Task SiteOperationsDashboardSourceSummarizesPrivacyEvents()
         "/",
         "session-a",
         observedAt.AddMinutes(-10),
-        ipAddress: "203.0.113.8"));
+        referrer: "https://search.example/results",
+        ipAddress: "203.0.113.8",
+        metadata: new Dictionary<string, string>
+        {
+            ["traffic_source"] = "search",
+            ["search_keyword"] = "portal",
+            ["is_entry"] = "true",
+            ["latency_ms"] = "50"
+        }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "page_view",
+        "/",
+        "session-d",
+        observedAt.AddMinutes(-9),
+        metadata: new Dictionary<string, string>
+        {
+            ["traffic_source"] = "direct",
+            ["is_exit"] = "true",
+            ["latency_ms"] = "2500"
+        }));
     await store.AddAsync(factory.Create(
         "site-1",
         "page_view",
         "/missing",
         "session-a",
-        observedAt.AddMinutes(-9),
+        observedAt.AddMinutes(-8),
         ipAddress: "203.0.113.8",
-        metadata: new Dictionary<string, string> { ["status_code"] = "404" }));
+        metadata: new Dictionary<string, string>
+        {
+            ["status_code"] = "404",
+            ["is_exit"] = "true"
+        }));
     await store.AddAsync(factory.Create(
         "site-1",
         "page_view",
-        "/agent",
+        "/agent/readiness",
         "session-b",
-        observedAt.AddMinutes(-8),
-        userAgent: "ExampleBot/1.0"));
+        observedAt.AddMinutes(-7),
+        userAgent: "ExampleBot/1.0",
+        metadata: new Dictionary<string, string>
+        {
+            ["traffic_source"] = "agent",
+            ["latency_ms"] = "100"
+        }));
     await store.AddAsync(factory.Create(
         "site-1",
         "download",
         "/files/report.pdf",
         "session-b",
-        observedAt.AddMinutes(-7)));
+        observedAt.AddMinutes(-6)));
     await store.AddAsync(factory.Create(
         "site-1",
         "form_submission",
         "/contact",
         "session-c",
-        observedAt.AddMinutes(-6)));
+        observedAt.AddMinutes(-5)));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "activity_registration",
+        "/activities/intro",
+        "session-c",
+        observedAt.AddMinutes(-4)));
     await store.AddAsync(factory.Create(
         "other-site",
         "page_view",
@@ -359,13 +477,315 @@ static async Task SiteOperationsDashboardSourceSummarizesPrivacyEvents()
 
     var signals = await source.CollectAsync();
 
-    Assert.Equal(3, Value(signals, "site.pageViews"));
-    Assert.Equal(2, Value(signals, "site.uniqueVisitors"));
+    Assert.Equal(4, Value(signals, "site.pageViews"));
+    Assert.Equal(3, Value(signals, "site.uniqueVisitors"));
     Assert.Equal(1, Value(signals, "site.botPageViews"));
     Assert.Equal(1, Value(signals, "site.notFoundPages"));
     Assert.Equal(1, Value(signals, "site.downloads"));
     Assert.Equal(1, Value(signals, "site.formSubmissions"));
+    Assert.Equal(1, Value(signals, "site.activityRegistrations"));
+    Assert.Equal(2, Value(signals, "site.topPageViews"));
+    Assert.Equal(1, Value(signals, "site.topSectionViews"));
+    Assert.Equal(3, Value(signals, "site.trafficSources"));
+    Assert.Equal(1, Value(signals, "site.searchKeywords"));
+    Assert.Equal(1, Value(signals, "site.topEntryPageViews"));
+    Assert.Equal(1, Value(signals, "site.topExitPageViews"));
+    Assert.Equal(1, Value(signals, "site.slowPages"));
+    Assert.Equal("/", Description(signals, "site.topPageViews"));
+    Assert.Equal("agent", Description(signals, "site.topSectionViews"));
+    Assert.Equal("agent", Description(signals, "site.trafficSources"));
+    Assert.Equal("portal", Description(signals, "site.searchKeywords"));
     Assert.True(signals.Alerts.Any(alert => alert.Code == "site.notFoundPages"), "Expected 404 alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "site.slowPages"), "Expected slow page alert.");
+}
+
+static async Task ContentAgentReadinessProviderDerivesPublicPageSignals()
+{
+    var siteId = Guid.NewGuid();
+    var store = new InMemoryContentItemStore();
+    var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+
+    await store.AddAsync(Content(
+        siteId,
+        "ready",
+        ContentPublicationStatus.Published,
+        observedAt.AddHours(-2),
+        publishedAt: observedAt.AddHours(-2),
+        summary: "Ready summary",
+        body: "Ready body",
+        source: "editorial"));
+    await store.AddAsync(Content(
+        siteId,
+        "thin",
+        ContentPublicationStatus.Published,
+        observedAt.AddHours(-1),
+        publishedAt: observedAt.AddHours(-1),
+        summary: "",
+        body: "",
+        source: null));
+    await store.AddAsync(Content(
+        siteId,
+        "draft",
+        ContentPublicationStatus.Draft,
+        observedAt.AddMinutes(-30),
+        summary: "Draft",
+        body: "Draft",
+        source: "editorial"));
+    await store.AddAsync(Content(
+        Guid.NewGuid(),
+        "other-site",
+        ContentPublicationStatus.Published,
+        observedAt.AddMinutes(-20),
+        publishedAt: observedAt.AddMinutes(-20),
+        summary: "Other",
+        body: "Other",
+        source: "editorial"));
+
+    var provider = new ContentAgentReadinessSignalProvider(
+        store,
+        siteId,
+        clock: () => observedAt);
+
+    var signals = await provider.ListAsync();
+
+    Assert.Equal(2, signals.Count);
+    var ready = signals.First(signal => signal.Url == "/content/ready");
+    var thin = signals.First(signal => signal.Url == "/content/thin");
+
+    Assert.Equal(100, ready.ReadinessScore);
+    Assert.True(ready.HasMarkdownSnapshot, "Expected complete content to have Markdown snapshot readiness.");
+    Assert.True(ready.HasJsonSnapshot, "Expected complete content to have JSON snapshot readiness.");
+    Assert.True(ready.IncludedInSitemap, "Expected published content to be sitemap-ready.");
+    Assert.True(ready.IncludedInLlmsTxt, "Expected published content to be llms.txt-ready.");
+    Assert.True(ready.HasStructuredData, "Expected complete content to have structured data readiness.");
+    Assert.True(ready.PublicOpenApiAvailable, "Expected public OpenAPI to be available by default.");
+
+    Assert.Equal(40, thin.ReadinessScore);
+    Assert.False(thin.HasMarkdownSnapshot, "Expected thin content to miss Markdown snapshot readiness.");
+    Assert.False(thin.HasJsonSnapshot, "Expected thin content to miss JSON snapshot readiness.");
+    Assert.False(thin.HasStructuredData, "Expected thin content to miss structured data readiness.");
+}
+
+static async Task AgentReadinessDashboardSourceReportsReadinessAndAgentTraffic()
+{
+    var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    var readiness = new InMemoryAgentReadinessSignalProvider();
+    await readiness.ReplaceAsync(new[]
+    {
+        new AgentReadinessPageSignal(
+            "home",
+            "/",
+            95,
+            HasMarkdownSnapshot: true,
+            HasJsonSnapshot: true,
+            IncludedInSitemap: true,
+            IncludedInLlmsTxt: true,
+            HasStructuredData: true,
+            PublicOpenApiAvailable: true),
+        new AgentReadinessPageSignal(
+            "missing",
+            "/missing",
+            52,
+            HasMarkdownSnapshot: false,
+            HasJsonSnapshot: false,
+            IncludedInSitemap: true,
+            IncludedInLlmsTxt: false,
+            HasStructuredData: false,
+            PublicOpenApiAvailable: false,
+            AgentFacingErrorCount: 1)
+    });
+
+    var store = new InMemoryAnalyticsEventStore();
+    var factory = new AnalyticsEventFactory(new AnalyticsPrivacyOptions
+    {
+        SessionHashSalt = "agent-test"
+    });
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "page_view",
+        "/missing",
+        "agent-session",
+        observedAt.AddMinutes(-5),
+        userAgent: "ExampleBot/1.0",
+        metadata: new Dictionary<string, string>
+        {
+            ["status_code"] = "404",
+            ["bot_policy"] = "blocked_training"
+        }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "page_view",
+        "/missing",
+        "agent-session-2",
+        observedAt.AddMinutes(-4),
+        userAgent: "ExampleBot/1.0"));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "page_view",
+        "/human",
+        "human-session",
+        observedAt.AddMinutes(-4)));
+
+    var source = new AgentReadinessDashboardSignalSource(
+        readiness,
+        store,
+        "site-1",
+        clock: () => observedAt);
+
+    var signals = await source.CollectAsync();
+
+    Assert.Equal(74, Value(signals, "agent.averageReadinessScore"));
+    Assert.Equal(1, Value(signals, "agent.lowScorePages"));
+    Assert.Equal(1, Value(signals, "agent.missingMarkdownSnapshots"));
+    Assert.Equal(1, Value(signals, "agent.missingJsonSnapshots"));
+    Assert.Equal(100, Value(signals, "agent.sitemapCoverage"));
+    Assert.Equal(50, Value(signals, "agent.llmsTxtCoverage"));
+    Assert.Equal(50, Value(signals, "agent.structuredDataCoverage"));
+    Assert.Equal(1, Value(signals, "agent.publicOpenApiStatus"));
+    Assert.Equal(2, Value(signals, "agent.aiBotTraffic"));
+    Assert.Equal(1, Value(signals, "agent.blockedTrainingBotRequests"));
+    Assert.Equal(2, Value(signals, "agent.agentFacingErrors"));
+    Assert.Equal(2, Value(signals, "agent.topAgentPageViews"));
+    Assert.Equal("/missing", Description(signals, "agent.topAgentPageViews"));
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "agent.snapshots"), "Expected missing snapshot alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "agent.errors"), "Expected agent-facing error alert.");
+    Assert.True(
+        signals.Alerts.First(alert => alert.Code == "agent.errors").IsActionable,
+        "Expected agent-facing error alert to link to analytics.");
+}
+
+static async Task SystemRuntimeDashboardSourceReportsOperationalEvents()
+{
+    var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    var store = new InMemoryAnalyticsEventStore();
+    var factory = new AnalyticsEventFactory(new AnalyticsPrivacyOptions
+    {
+        SessionHashSalt = "runtime-test"
+    });
+
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "api_request",
+        "/api/public/search",
+        "session-a",
+        observedAt.AddMinutes(-10),
+        metadata: new Dictionary<string, string>
+        {
+            ["latency_ms"] = "1200",
+            ["status_code"] = "500"
+        }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "api_request",
+        "/api/public/datasets",
+        "session-b",
+        observedAt.AddMinutes(-9),
+        metadata: new Dictionary<string, string>
+        {
+            ["latency_ms"] = "100",
+            ["status_code"] = "200"
+        }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "background_job",
+        "search-index",
+        "job-a",
+        observedAt.AddMinutes(-8),
+        metadata: new Dictionary<string, string> { ["status"] = "failed" }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "background_job",
+        "snapshot-generator",
+        "job-b",
+        observedAt.AddMinutes(-7),
+        metadata: new Dictionary<string, string> { ["status"] = "succeeded" }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "search_indexing",
+        "content",
+        "job-c",
+        observedAt.AddMinutes(-6),
+        metadata: new Dictionary<string, string> { ["lag_seconds"] = "45" }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "snapshot_generation",
+        "/content/a",
+        "job-d",
+        observedAt.AddMinutes(-5),
+        metadata: new Dictionary<string, string> { ["status"] = "failed" }));
+    await store.AddAsync(factory.Create(
+        "site-1",
+        "public_output_revalidation",
+        "/sitemap.xml",
+        "job-e",
+        observedAt.AddMinutes(-4),
+        metadata: new Dictionary<string, string> { ["status"] = "failed" }));
+
+    var source = new SystemRuntimeDashboardSignalSource(
+        store,
+        "site-1",
+        apiErrorRateWarningPercent: 10,
+        apiLatencyWarningMilliseconds: 500,
+        clock: () => observedAt);
+
+    var signals = await source.CollectAsync();
+
+    Assert.Equal(650, Value(signals, "system.apiAverageLatencyMs"));
+    Assert.Equal(50.0m, Value(signals, "system.apiErrorRate"));
+    Assert.Equal(50.0m, Value(signals, "system.backgroundJobSuccessRate"));
+    Assert.Equal(1, Value(signals, "system.failedJobCount"));
+    Assert.Equal(45, Value(signals, "system.searchIndexingLagSeconds"));
+    Assert.Equal(1, Value(signals, "system.snapshotGenerationFailures"));
+    Assert.Equal(1, Value(signals, "system.revalidationFailures"));
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "system.apiErrorRate"), "Expected API error alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "system.failedJobs"), "Expected failed job alert.");
+    Assert.True(
+        signals.Alerts.All(alert => alert.IsActionable),
+        "Expected runtime health alerts to be actionable.");
+}
+
+static async Task SystemHealthDashboardSourceReportsDependencyStatus()
+{
+    var observedAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    var source = new SystemHealthDashboardSignalSource(
+        new IDashboardHealthProbe[]
+        {
+            new StaticDashboardHealthProbe(
+                "database",
+                "Database",
+                DashboardHealthProbeStatus.Healthy,
+                TimeSpan.FromMilliseconds(4),
+                clock: () => observedAt),
+            new StaticDashboardHealthProbe(
+                "redis",
+                "Redis",
+                DashboardHealthProbeStatus.Degraded,
+                TimeSpan.FromMilliseconds(10),
+                "Redis cache is not configured.",
+                "/admin/system/storage",
+                () => observedAt),
+            new StaticDashboardHealthProbe(
+                "storage",
+                "Object storage",
+                DashboardHealthProbeStatus.Unhealthy,
+                TimeSpan.FromMilliseconds(1),
+                "Object storage is not configured.",
+                "/admin/system/storage",
+                () => observedAt)
+        },
+        () => observedAt);
+
+    var signals = await source.CollectAsync();
+
+    Assert.Equal(3, Value(signals, "system.dependencyCount"));
+    Assert.Equal(1, Value(signals, "system.unhealthyDependencies"));
+    Assert.Equal(1, Value(signals, "system.degradedDependencies"));
+    Assert.Equal(5, Value(signals, "system.averageDependencyLatencyMs"));
+    Assert.Equal(1, Value(signals, "system.dependency.database"));
+    Assert.Equal(0, Value(signals, "system.dependency.redis"));
+    Assert.Equal(0, Value(signals, "system.dependency.storage"));
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "system.dependency.redis"), "Expected degraded dependency alert.");
+    Assert.True(signals.Alerts.Any(alert => alert.Code == "system.dependency.storage"), "Expected unhealthy dependency alert.");
 }
 
 static async Task DashboardSummaryServiceReusesFreshSnapshot()
@@ -550,6 +970,59 @@ static Task AdminDashboardPostgresStorageIsExplicitlyConfigurable()
     return Task.CompletedTask;
 }
 
+static Task AdminDashboardRegistersR7SignalSources()
+{
+    var program = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.AdminHost",
+        "Program.cs"));
+
+    Assert.Contains("AgentReadinessDashboardSignalSource", program);
+    Assert.Contains("ContentAgentReadinessSignalProvider", program);
+    Assert.Contains("SystemRuntimeDashboardSignalSource", program);
+    Assert.Contains("SystemHealthDashboardSignalSource", program);
+    Assert.Contains("IAgentReadinessSignalProvider", program);
+    Assert.Contains("IDashboardHealthProbe", program);
+
+    return Task.CompletedTask;
+}
+
+static Task ApiHostCapturesPublicAnalyticsRuntimeEvents()
+{
+    var program = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.ApiHost",
+        "Program.cs"));
+
+    Assert.Contains("IAnalyticsEventStore", program);
+    Assert.Contains("InMemoryAnalyticsEventStore", program);
+    Assert.Contains("PostgresAnalyticsEventStore", program);
+    Assert.Contains("DashboardPostgresStorageOptions", program);
+    Assert.Contains("AnalyticsEventFactory", program);
+    Assert.Contains("ApiAnalyticsCaptureQueue", program);
+    Assert.Contains("AddHostedService", program);
+    Assert.Contains("TryEnqueue", program);
+    Assert.Contains("Channel.CreateBounded", program);
+    Assert.Contains("IsPublicOutputRequest", program);
+    Assert.Contains("\"api_request\"", program);
+    Assert.Contains("\"latency_ms\"", program);
+    Assert.Contains("\"status_code\"", program);
+    Assert.Contains("/analytics/client.js", program);
+    Assert.Contains("/analytics/events", program);
+    Assert.Contains("localStorage", program);
+    Assert.False(program.Contains("document.cookie", StringComparison.OrdinalIgnoreCase), "Analytics client must not use cookies.");
+    Assert.False(program.Contains("await CaptureAnalyticsEventAsync", StringComparison.Ordinal), "Public analytics capture should not block public responses.");
+
+    var production = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.ApiHost",
+        "appsettings.json"));
+    Assert.Contains("\"PostgreSQL\"", production);
+    Assert.Contains("\"Enabled\": false", production);
+
+    return Task.CompletedTask;
+}
+
 static DashboardMetricSnapshot Metric(
     string code,
     string label,
@@ -605,25 +1078,31 @@ static ContentItem Content(
     DateTimeOffset updatedAt,
     DateTimeOffset? publishedAt = null,
     string summary = "Summary",
-    Guid? coverAssetId = null)
+    Guid? coverAssetId = null,
+    string body = "Body",
+    string? source = null,
+    DateTimeOffset? expiresAt = null,
+    Guid? contentTypeId = null,
+    Guid? authorId = null,
+    Guid? categoryId = null)
 {
     return new ContentItem(
         Guid.NewGuid(),
         siteId,
-        Guid.NewGuid(),
+        contentTypeId ?? Guid.NewGuid(),
         slug,
         slug,
         summary,
-        "Body",
+        body,
         coverAssetId,
         status,
-        CategoryId: null,
+        categoryId,
         Array.Empty<string>(),
-        AuthorId: null,
-        Source: null,
+        authorId,
+        source,
         publishedAt,
         ScheduledAt: null,
-        ExpiresAt: null,
+        expiresAt,
         Guid.NewGuid(),
         Guid.NewGuid(),
         updatedAt.AddDays(-1),
@@ -670,6 +1149,19 @@ static decimal Value(DashboardSignalSet signals, string code)
     }
 
     return metric.Value;
+}
+
+static string? Description(DashboardSignalSet signals, string code)
+{
+    var metric = signals.Metrics.FirstOrDefault(candidate =>
+        string.Equals(candidate.Code, code, StringComparison.Ordinal));
+
+    if (metric is null)
+    {
+        throw new InvalidOperationException($"Metric '{code}' was not found.");
+    }
+
+    return metric.Description;
 }
 
 internal static class Assert

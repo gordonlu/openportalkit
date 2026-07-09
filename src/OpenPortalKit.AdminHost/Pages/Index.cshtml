@@ -75,160 +75,16 @@
 
         <section class="opk-alert-strip" id="dashboard-alerts" aria-label="Actionable dashboard alerts" hidden></section>
 
-        <section class="opk-dashboard-grid" id="dashboard">
-            <div class="opk-panel opk-panel-wide" id="content">
+        <section class="opk-dashboard-grid" id="dashboard" aria-label="Dashboard cards">
+            <div class="opk-panel opk-panel-wide">
                 <div class="opk-panel-header">
                     <div>
-                        <h2>Publishing Queue</h2>
-                        <p>Items closest to public output changes.</p>
-                    </div>
-                    <div class="opk-segmented" aria-label="Queue filter">
-                        <button type="button" class="is-selected">Review</button>
-                        <button type="button">Scheduled</button>
-                        <button type="button">Drafts</button>
+                        <h2>Dashboard Signals</h2>
+                        <p>Live module summaries from site operations, publishing, data, agent readiness, and system health.</p>
                     </div>
                 </div>
-
-                <div class="opk-table-wrap">
-                    <table class="opk-table">
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Owner</th>
-                                <th>Updated</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>
-                                    <strong>Product documentation refresh</strong>
-                                    <span>Canonical metadata ready</span>
-                                </td>
-                                <td>Page</td>
-                                <td><span class="opk-chip is-review">Review</span></td>
-                                <td>Editorial</td>
-                                <td>08:42</td>
-                            </tr>
-                            <tr>
-                                <td>
-                                    <strong>Research portal release notes</strong>
-                                    <span>Markdown snapshot queued</span>
-                                </td>
-                                <td>Report</td>
-                                <td><span class="opk-chip is-approved">Approved</span></td>
-                                <td>Publishing</td>
-                                <td>Yesterday</td>
-                            </tr>
-                            <tr>
-                                <td>
-                                    <strong>Service availability announcement</strong>
-                                    <span>RSS and sitemap pending</span>
-                                </td>
-                                <td>Announcement</td>
-                                <td><span class="opk-chip is-scheduled">Scheduled</span></td>
-                                <td>Operations</td>
-                                <td>Mon</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="opk-panel" id="agent-access">
-                <div class="opk-panel-header">
-                    <div>
-                        <h2>Output Readiness</h2>
-                        <p>Human and machine-readable forms.</p>
-                    </div>
-                </div>
-                <ul class="opk-check-list">
-                    <li><span class="opk-status-dot is-ok"></span>HTML published</li>
-                    <li><span class="opk-status-dot is-ok"></span>JSON snapshots</li>
-                    <li><span class="opk-status-dot is-ok"></span>Markdown snapshots</li>
-                    <li><span class="opk-status-dot is-warn"></span>RSS refresh queued</li>
-                    <li><span class="opk-status-dot is-ok"></span>Sitemap current</li>
-                </ul>
-            </div>
-
-            <div class="opk-panel" id="data">
-                <div class="opk-panel-header">
-                    <div>
-                        <h2>Data Freshness</h2>
-                        <p>Structured publishing traces.</p>
-                    </div>
-                </div>
-                <div class="opk-stack">
-                    <div class="opk-data-row">
-                        <span>Course catalog</span>
-                        <strong>Current</strong>
-                    </div>
-                    <div class="opk-data-row">
-                        <span>Research indicators</span>
-                        <strong>2h old</strong>
-                    </div>
-                    <div class="opk-data-row">
-                        <span>Activity schedule</span>
-                        <strong>Current</strong>
-                    </div>
-                </div>
-            </div>
-
-            <div class="opk-panel" id="audit">
-                <div class="opk-panel-header">
-                    <div>
-                        <h2>Recent Audit</h2>
-                        <p>Public-output-changing actions.</p>
-                    </div>
-                </div>
-                <ol class="opk-timeline">
-                    <li>
-                        <span>09:12</span>
-                        <strong>ContentPublished</strong>
-                        <p>Public detail page and snapshots updated.</p>
-                    </li>
-                    <li>
-                        <span>08:58</span>
-                        <strong>WorkflowApproved</strong>
-                        <p>Review queue item moved to publish-ready.</p>
-                    </li>
-                    <li>
-                        <span>08:21</span>
-                        <strong>DatasetPublished</strong>
-                        <p>Public records endpoint refreshed.</p>
-                    </li>
-                </ol>
-            </div>
-
-            <div class="opk-panel" id="jobs">
-                <div class="opk-panel-header">
-                    <div>
-                        <h2>Background Jobs</h2>
-                        <p>Outbox and public output processing.</p>
-                    </div>
-                </div>
-                <div class="opk-job-list">
-                    <div><span>Search index</span><span class="opk-chip is-approved">Done</span></div>
-                    <div><span>Snapshot generator</span><span class="opk-chip is-review">Running</span></div>
-                    <div><span>Sitemap refresh</span><span class="opk-chip is-scheduled">Queued</span></div>
-                </div>
-            </div>
-
-            <div class="opk-panel" id="workflow">
-                <div class="opk-panel-header">
-                    <div>
-                        <h2>Module Registry</h2>
-                        <p>Loaded boundaries and public outputs.</p>
-                    </div>
-                </div>
-                <div class="opk-module-grid">
-                    <span>Content</span>
-                    <span>Data</span>
-                    <span>SEO</span>
-                    <span>Search</span>
-                    <span>AgentAccess</span>
-                    <span>Audit</span>
+                <div class="opk-dashboard-card-list" id="dashboard-card-list">
+                    <div class="opk-empty-state">Loading dashboard signals...</div>
                 </div>
             </div>
         </section>
@@ -239,6 +95,7 @@
     (() => {
         const metricGrid = document.getElementById("dashboard-metrics");
         const alertStrip = document.getElementById("dashboard-alerts");
+        const cardList = document.getElementById("dashboard-card-list");
         const areaNames = {
             0: "Site operations",
             1: "Content",
@@ -259,9 +116,45 @@
             return `${metric.value}`;
         };
 
+        const statusClass = (metric) => {
+            if (metric.unit === "status") {
+                return metric.value > 0 ? "is-approved" : "is-review";
+            }
+
+            if (metric.value > 0) {
+                return "is-draft";
+            }
+
+            return "is-approved";
+        };
+
         const detailText = (metric) => {
             const areaName = areaNames[metric.area] || "Dashboard";
             return `${areaName} - ${metric.unit}`;
+        };
+
+        const cardAnchor = (card) => {
+            if (card.area === 1) {
+                return "content";
+            }
+
+            if (card.area === 2) {
+                return "data";
+            }
+
+            if (card.area === 3) {
+                return "agent-access";
+            }
+
+            if (card.code === "system.background") {
+                return "jobs";
+            }
+
+            if (card.area === 4) {
+                return "settings";
+            }
+
+            return "";
         };
 
         const renderMetrics = (cards) => {
@@ -290,6 +183,62 @@
 
                 article.append(label, value, detail);
                 return article;
+            }));
+        };
+
+        const renderCards = (cards) => {
+            if (!cards.length) {
+                const empty = document.createElement("div");
+                empty.className = "opk-empty-state";
+                empty.textContent = "No dashboard signals are available yet.";
+                cardList.replaceChildren(empty);
+                return;
+            }
+
+            const usedAnchors = new Set();
+            cardList.replaceChildren(...cards.map((card) => {
+                const section = document.createElement("section");
+                section.className = "opk-dashboard-card";
+                const anchor = cardAnchor(card);
+                if (anchor && !usedAnchors.has(anchor)) {
+                    section.id = anchor;
+                    usedAnchors.add(anchor);
+                }
+
+                const header = document.createElement("div");
+                header.className = "opk-dashboard-card-header";
+
+                const titleGroup = document.createElement("div");
+                const title = document.createElement("h3");
+                title.textContent = card.title;
+                const subtitle = document.createElement("p");
+                subtitle.textContent = areaNames[card.area] || "Dashboard";
+                titleGroup.append(title, subtitle);
+
+                const badge = document.createElement("span");
+                badge.className = card.alerts && card.alerts.length > 0 ? "opk-chip is-review" : "opk-chip is-approved";
+                badge.textContent = `${card.alerts ? card.alerts.length : 0} alerts`;
+                header.append(titleGroup, badge);
+
+                const metrics = document.createElement("div");
+                metrics.className = "opk-dashboard-metrics";
+                metrics.append(...(card.metrics || []).map((metric) => {
+                    const row = document.createElement("div");
+                    row.className = "opk-data-row";
+
+                    const label = document.createElement("span");
+                    label.textContent = metric.description ? `${metric.label} - ${metric.description}` : metric.label;
+
+                    const value = document.createElement("strong");
+                    value.className = metric.unit === "status" ? `opk-chip ${statusClass(metric)}` : "";
+                    value.textContent = valueText(metric);
+
+                    row.append(label, value);
+                    return row;
+                }));
+
+                section.append(header, metrics);
+                return section;
             }));
         };
 
@@ -322,10 +271,16 @@
                 }
 
                 renderMetrics(summary.cards);
+                renderCards(summary.cards);
                 renderAlerts(summary.cards);
             })
             .catch(() => {
                 alertStrip.hidden = true;
+                cardList.replaceChildren();
+                const empty = document.createElement("div");
+                empty.className = "opk-empty-state";
+                empty.textContent = "Dashboard signals could not be loaded.";
+                cardList.append(empty);
             });
     })();
 </script>

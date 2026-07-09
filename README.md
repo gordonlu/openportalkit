@@ -18,7 +18,7 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - Publishing workflow transitions for draft, review, approval, rejection, scheduling, publishing, archive, restore, audit, and approval records
 - Structured data dataset, schema version, import batch, CSV import/export, record traceability, checksum, dry run, quality report, snapshot, and public query contracts
 - Search abstraction with in-memory provider, public/admin visibility rules, filters, repeatable reindexing, and outbox-driven indexing hook
-- Dashboard and analytics contracts with privacy-conscious event capture, cached summaries, Prometheus text export, and .NET metrics publishing
+- Dashboard and analytics contracts with privacy-conscious event capture, AgentSEO readiness summaries, runtime health aggregation, dependency health probes, cached summaries, Prometheus text export, and .NET metrics publishing
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs
@@ -72,6 +72,8 @@ The API host exposes:
 - `/api/public/datasets/{code}/export.csv`
 - `/api/public/search`
 - `/api/public/search/health`
+- `/analytics/client.js`
+- `/analytics/events`
 
 The admin host exposes:
 

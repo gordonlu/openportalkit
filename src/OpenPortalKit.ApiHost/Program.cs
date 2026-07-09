@@ -1,9 +1,13 @@
+using System.Diagnostics;
+using System.Threading.Channels;
 using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
 using OpenPortalKit.Modules.Content;
 using OpenPortalKit.Modules.Dashboard;
+using OpenPortalKit.Modules.Dashboard.Analytics;
+using OpenPortalKit.Modules.Dashboard.Storage;
 using OpenPortalKit.Modules.Data;
 using OpenPortalKit.Modules.Data.Datasets;
 using OpenPortalKit.Modules.Identity;
@@ -14,14 +18,68 @@ using OpenPortalKit.Modules.Seo;
 using OpenPortalKit.Modules.Seo.PublicResources;
 using OpenPortalKit.Modules.Seo.Redirects;
 using OpenPortalKit.Modules.Workflow;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
 builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
+builder.Services.Configure<AnalyticsPrivacyOptions>(
+    builder.Configuration.GetSection(AnalyticsPrivacyOptions.SectionName));
+var dashboardPostgres = builder.Configuration
+    .GetSection(DashboardPostgresStorageOptions.SectionName)
+    .Get<DashboardPostgresStorageOptions>() ?? new DashboardPostgresStorageOptions();
+if (string.IsNullOrWhiteSpace(dashboardPostgres.ConnectionString))
+{
+    dashboardPostgres.ConnectionString = builder.Configuration.GetConnectionString(
+        dashboardPostgres.ConnectionStringName);
+}
+
+builder.Services.AddSingleton(dashboardPostgres);
+if (dashboardPostgres.Enabled)
+{
+    builder.Services.AddSingleton<IDashboardDbConnectionFactory, DashboardPostgresConnectionFactory>();
+    builder.Services.AddSingleton<IAnalyticsEventStore, PostgresAnalyticsEventStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IAnalyticsEventStore, InMemoryAnalyticsEventStore>();
+}
+
+builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
+    new AnalyticsEventFactory(provider.GetRequiredService<IOptions<AnalyticsPrivacyOptions>>().Value));
+builder.Services.AddSingleton<ApiAnalyticsCaptureQueue>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ApiAnalyticsCaptureQueue>());
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    if (!IsPublicOutputRequest(context.Request))
+    {
+        await next();
+        return;
+    }
+
+    var stopwatch = Stopwatch.StartNew();
+    await next();
+    stopwatch.Stop();
+
+    var analyticsEvent = CreateAnalyticsEvent(
+        context,
+        "api_request",
+        new Dictionary<string, string>
+        {
+            ["method"] = context.Request.Method,
+            ["status_code"] = context.Response.StatusCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["latency_ms"] = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["public_output"] = "true"
+        });
+    context.RequestServices
+        .GetRequiredService<ApiAnalyticsCaptureQueue>()
+        .TryEnqueue(analyticsEvent);
+});
 
 var modules = new[]
 {
@@ -83,6 +141,52 @@ app.MapGet("/api/public", () => new
         "json-snapshots",
         "openapi"
     }
+});
+
+app.MapGet("/analytics/client.js", () => Results.Text(BuildAnalyticsClientScript(), "text/javascript; charset=utf-8"));
+
+app.MapPost("/analytics/events", async (
+    AnalyticsEventCaptureRequest request,
+    HttpContext context,
+    IOptions<AnalyticsPrivacyOptions> options,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.EventType) ||
+        string.IsNullOrWhiteSpace(request.Path))
+    {
+        return Results.BadRequest(new { Error = "eventType and path are required." });
+    }
+
+    var metadata = request.Metadata?.ToDictionary() ?? new Dictionary<string, string>();
+    metadata.TryAdd("client_type", "browser");
+
+    var analyticsEvent = await StoreAnalyticsEventAsync(
+        context,
+        request.EventType,
+        metadata,
+        request.SiteId,
+        request.Path,
+        request.SessionId,
+        request.OccurredAt,
+        request.Referrer,
+        request.UserAgent,
+        request.IpAddress,
+        cancellationToken);
+    await context.RequestServices
+        .GetRequiredService<IAnalyticsEventStore>()
+        .DeleteOlderThanAsync(
+            DateTimeOffset.UtcNow.AddDays(-Math.Max(1, options.Value.RetentionDays)),
+            cancellationToken);
+
+    return Results.Accepted("/admin/analytics/events", new
+    {
+        analyticsEvent.Id,
+        analyticsEvent.SiteId,
+        analyticsEvent.EventType,
+        analyticsEvent.Path,
+        analyticsEvent.OccurredAt,
+        analyticsEvent.IsBot
+    });
 });
 
 app.MapGet("/robots.txt", (HttpRequest request) =>
@@ -228,6 +332,148 @@ app.MapGet("/api/public/search/health", async () =>
 });
 
 app.Run();
+
+static bool IsPublicOutputRequest(HttpRequest request)
+{
+    if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+    {
+        return false;
+    }
+
+    return request.Path.StartsWithSegments("/api/public", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/robots.txt", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/sitemap.xml", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/rss.xml", StringComparison.OrdinalIgnoreCase);
+}
+
+static async Task<AnalyticsEvent> StoreAnalyticsEventAsync(
+    HttpContext context,
+    string eventType,
+    IReadOnlyDictionary<string, string>? metadata = null,
+    string? siteId = null,
+    string? path = null,
+    string? sessionId = null,
+    DateTimeOffset? occurredAt = null,
+    string? referrer = null,
+    string? userAgent = null,
+    string? ipAddress = null,
+    CancellationToken cancellationToken = default)
+{
+    var analyticsEvent = CreateAnalyticsEvent(
+        context,
+        eventType,
+        metadata,
+        siteId,
+        path,
+        sessionId,
+        occurredAt,
+        referrer,
+        userAgent,
+        ipAddress);
+    await context.RequestServices
+        .GetRequiredService<IAnalyticsEventStore>()
+        .AddAsync(analyticsEvent, cancellationToken);
+
+    return analyticsEvent;
+}
+
+static AnalyticsEvent CreateAnalyticsEvent(
+    HttpContext context,
+    string eventType,
+    IReadOnlyDictionary<string, string>? metadata = null,
+    string? siteId = null,
+    string? path = null,
+    string? sessionId = null,
+    DateTimeOffset? occurredAt = null,
+    string? referrer = null,
+    string? userAgent = null,
+    string? ipAddress = null)
+{
+    var factory = context.RequestServices.GetRequiredService<AnalyticsEventFactory>();
+    return factory.Create(
+        string.IsNullOrWhiteSpace(siteId) ? ResolveSiteId(context) : siteId,
+        eventType,
+        string.IsNullOrWhiteSpace(path) ? context.Request.Path + context.Request.QueryString : path,
+        ResolveSessionId(context, sessionId),
+        occurredAt ?? DateTimeOffset.UtcNow,
+        referrer ?? context.Request.Headers.Referer.ToString(),
+        userAgent ?? context.Request.Headers.UserAgent.ToString(),
+        ipAddress ?? context.Connection.RemoteIpAddress?.ToString(),
+        metadata);
+}
+
+static string ResolveSiteId(HttpContext context)
+{
+    var headerValue = context.Request.Headers["X-OpenPortalKit-Site"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(headerValue))
+    {
+        return headerValue;
+    }
+
+    var configured = context.RequestServices
+        .GetRequiredService<IConfiguration>()
+        .GetValue<string>("OpenPortalKit:Analytics:SiteId");
+    return string.IsNullOrWhiteSpace(configured) ? context.Request.Host.Host : configured;
+}
+
+static string ResolveSessionId(HttpContext context, string? explicitSessionId)
+{
+    if (!string.IsNullOrWhiteSpace(explicitSessionId))
+    {
+        return explicitSessionId;
+    }
+
+    var headerValue = context.Request.Headers["X-OpenPortalKit-Session"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(headerValue))
+    {
+        return headerValue;
+    }
+
+    var userAgent = context.Request.Headers.UserAgent.ToString();
+    var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    return remoteIp + ":" + userAgent;
+}
+
+static string BuildAnalyticsClientScript()
+{
+    return """
+(() => {
+  const endpoint = "/analytics/events";
+  const key = "opk_session";
+  const site = document.documentElement.getAttribute("data-opk-site") || location.host;
+  let session = localStorage.getItem(key);
+  if (!session) {
+    session = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "." + Math.random();
+    localStorage.setItem(key, session);
+  }
+
+  const payload = {
+    siteId: site,
+    eventType: "page_view",
+    path: location.pathname + location.search,
+    sessionId: session,
+    referrer: document.referrer || null,
+    userAgent: navigator.userAgent,
+    metadata: {
+      page_title: document.title || "",
+      client_type: "browser"
+    }
+  };
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(endpoint, new Blob([JSON.stringify(payload)], { type: "application/json" }));
+    return;
+  }
+
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    keepalive: true
+  }).catch(() => {});
+})();
+""";
+}
 
 static Uri GetSiteBaseUrl(HttpRequest request)
 {
@@ -388,3 +634,79 @@ internal sealed record SampleDataContext(
     Guid SiteId,
     InMemoryDataSetStore DataSetStore,
     InMemoryDataRecordStore RecordStore);
+
+public sealed record AnalyticsEventCaptureRequest(
+    string? SiteId,
+    string EventType,
+    string Path,
+    string? SessionId = null,
+    DateTimeOffset? OccurredAt = null,
+    string? Referrer = null,
+    string? UserAgent = null,
+    string? IpAddress = null,
+    IReadOnlyDictionary<string, string>? Metadata = null);
+
+public sealed class ApiAnalyticsCaptureQueue : BackgroundService
+{
+    private readonly Channel<AnalyticsEvent> _channel;
+    private readonly IAnalyticsEventStore _store;
+    private readonly AnalyticsPrivacyOptions _options;
+    private readonly ILogger<ApiAnalyticsCaptureQueue> _logger;
+    private DateTimeOffset _lastPruned = DateTimeOffset.MinValue;
+
+    public ApiAnalyticsCaptureQueue(
+        IAnalyticsEventStore store,
+        IOptions<AnalyticsPrivacyOptions> options,
+        ILogger<ApiAnalyticsCaptureQueue> logger)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _channel = Channel.CreateBounded<AnalyticsEvent>(new BoundedChannelOptions(4096)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+    }
+
+    public bool TryEnqueue(AnalyticsEvent analyticsEvent)
+    {
+        ArgumentNullException.ThrowIfNull(analyticsEvent);
+        return _channel.Writer.TryWrite(analyticsEvent);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var analyticsEvent in _channel.Reader.ReadAllAsync(stoppingToken))
+        {
+            try
+            {
+                await _store.AddAsync(analyticsEvent, stoppingToken);
+                await PruneIfDueAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Analytics event capture failed.");
+            }
+        }
+    }
+
+    private async Task PruneIfDueAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastPruned < TimeSpan.FromHours(1))
+        {
+            return;
+        }
+
+        _lastPruned = now;
+        await _store.DeleteOlderThanAsync(
+            now.AddDays(-Math.Max(1, _options.RetentionDays)),
+            cancellationToken);
+    }
+}

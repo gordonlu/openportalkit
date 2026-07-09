@@ -55,8 +55,20 @@ public sealed class ContentDashboardSignalSource : IDashboardSignalSource
             item.Status is ContentPublicationStatus.Draft or ContentPublicationStatus.Approved);
         var archivedCount = Count(items, ContentPublicationStatus.Archived);
         var staleCount = publicItems.Count(item => item.UpdatedAt < staleBefore);
+        var missingSeoMetadataCount = publicItems.Count(item =>
+            string.IsNullOrWhiteSpace(item.Title) ||
+            string.IsNullOrWhiteSpace(item.Summary) ||
+            string.IsNullOrWhiteSpace(item.Source));
         var missingSummaryCount = publicItems.Count(item => string.IsNullOrWhiteSpace(item.Summary));
         var missingCoverCount = publicItems.Count(item => item.CoverAssetId is null);
+        var missingAgentSnapshotsCount = publicItems.Count(item =>
+            string.IsNullOrWhiteSpace(item.Title) ||
+            string.IsNullOrWhiteSpace(item.Slug) ||
+            string.IsNullOrWhiteSpace(item.Summary) ||
+            string.IsNullOrWhiteSpace(item.Body));
+        var topContentType = TopGroup(publicItems, item => item.ContentTypeId.ToString("N"));
+        var topAuthor = TopGroup(publicItems.Where(item => item.AuthorId is not null), item => item.AuthorId?.ToString("N"));
+        var topCategory = TopGroup(publicItems.Where(item => item.CategoryId is not null), item => item.CategoryId?.ToString("N"));
 
         var metrics = new[]
         {
@@ -67,8 +79,13 @@ public sealed class ContentDashboardSignalSource : IDashboardSignalSource
             Metric("content.scheduledCount", "Scheduled", PublishingCardCode, PublishingCardTitle, scheduledCount, observedAt, 50),
             Metric("content.archivedCount", "Archived", PublishingCardCode, PublishingCardTitle, archivedCount, observedAt, 60),
             Metric("content.staleCount", "Stale content", ReadinessCardCode, ReadinessCardTitle, staleCount, observedAt, 10),
-            Metric("content.missingSummary", "Missing summary", ReadinessCardCode, ReadinessCardTitle, missingSummaryCount, observedAt, 20),
-            Metric("content.missingCover", "Missing cover", ReadinessCardCode, ReadinessCardTitle, missingCoverCount, observedAt, 30)
+            Metric("content.missingSeoMetadata", "Missing SEO metadata", ReadinessCardCode, ReadinessCardTitle, missingSeoMetadataCount, observedAt, 20),
+            Metric("content.missingSummary", "Missing summary", ReadinessCardCode, ReadinessCardTitle, missingSummaryCount, observedAt, 30),
+            Metric("content.missingCover", "Missing cover", ReadinessCardCode, ReadinessCardTitle, missingCoverCount, observedAt, 40),
+            Metric("content.missingAgentSnapshots", "Missing AgentSEO snapshots", ReadinessCardCode, ReadinessCardTitle, missingAgentSnapshotsCount, observedAt, 50),
+            Metric("content.topContentTypeCount", "Top content type", ReadinessCardCode, ReadinessCardTitle, topContentType.Count, observedAt, 60, topContentType.Key),
+            Metric("content.topAuthorCount", "Top author", ReadinessCardCode, ReadinessCardTitle, topAuthor.Count, observedAt, 70, topAuthor.Key),
+            Metric("content.topCategoryCount", "Top category", ReadinessCardCode, ReadinessCardTitle, topCategory.Count, observedAt, 80, topCategory.Key)
         };
 
         var alerts = new List<DashboardAlert>();
@@ -108,12 +125,52 @@ public sealed class ContentDashboardSignalSource : IDashboardSignalSource
                 "/Content"));
         }
 
+        if (missingSeoMetadataCount > 0)
+        {
+            alerts.Add(Alert(
+                "content.seoMetadata",
+                "Published content is missing SEO metadata inputs.",
+                ReadinessCardCode,
+                ReadinessCardTitle,
+                DashboardAlertLevel.Warning,
+                observedAt,
+                "/Content"));
+        }
+
+        if (missingAgentSnapshotsCount > 0)
+        {
+            alerts.Add(Alert(
+                "content.agentSnapshots",
+                "Published content is missing agent-readable snapshot inputs.",
+                ReadinessCardCode,
+                ReadinessCardTitle,
+                DashboardAlertLevel.Warning,
+                observedAt,
+                "/Content"));
+        }
+
         return new DashboardSignalSet(SourceModule, metrics, alerts);
     }
 
     private static int Count(IEnumerable<ContentItem> items, ContentPublicationStatus status)
     {
         return items.Count(item => item.Status == status);
+    }
+
+    private static (string? Key, int Count) TopGroup(
+        IEnumerable<ContentItem> items,
+        Func<ContentItem, string?> keySelector)
+    {
+        var top = items
+            .Select(keySelector)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Key = group.Key, Count = group.Count() })
+            .OrderByDescending(group => group.Count)
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        return top is null ? (null, 0) : (top.Key, top.Count);
     }
 
     private static DashboardMetricSnapshot Metric(
@@ -123,7 +180,8 @@ public sealed class ContentDashboardSignalSource : IDashboardSignalSource
         string cardTitle,
         decimal value,
         DateTimeOffset observedAt,
-        int sortOrder)
+        int sortOrder,
+        string? description = null)
     {
         return new DashboardMetricSnapshot(
             code,
@@ -135,7 +193,8 @@ public sealed class ContentDashboardSignalSource : IDashboardSignalSource
             "items",
             observedAt,
             ContentModule.Descriptor.Name,
-            sortOrder);
+            sortOrder,
+            description);
     }
 
     private static DashboardAlert Alert(
