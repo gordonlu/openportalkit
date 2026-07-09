@@ -9,4 +9,6 @@ public sealed record PublicOutputRevalidationPlan(
     bool RegenerateRss,
     bool RegenerateSnapshots,
     bool InvalidateRouteCache,
-    bool WarmImportantPages);
+    bool WarmImportantPages,
+    IReadOnlyList<string>? SnapshotRoutes = null,
+    bool RegenerateLlmsText = false);

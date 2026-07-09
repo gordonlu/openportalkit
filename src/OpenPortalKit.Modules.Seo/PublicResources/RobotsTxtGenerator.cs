@@ -24,6 +24,11 @@ public static class RobotsTxtGenerator
                 builder.Append("Disallow: ").AppendLine(path);
             }
 
+            if (directive.CrawlDelaySeconds is > 0)
+            {
+                builder.Append("Crawl-delay: ").AppendLine(directive.CrawlDelaySeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
             builder.AppendLine();
         }
 

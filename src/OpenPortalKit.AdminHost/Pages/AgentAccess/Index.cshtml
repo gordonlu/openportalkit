@@ -1,0 +1,179 @@
+﻿@page
+@model OpenPortalKit.AdminHost.Pages.AgentAccess.IndexModel
+@{
+    ViewData["Title"] = "Agent Access";
+}
+
+<section class="opk-admin-shell">
+    <aside class="opk-sidebar" aria-label="Admin navigation">
+        <a class="opk-brand" asp-page="/Index" aria-label="OpenPortalKit Admin home">
+            <span class="opk-brand-mark">OP</span>
+            <span>
+                <strong>OpenPortalKit</strong>
+                <small>Admin</small>
+            </span>
+        </a>
+
+        <nav class="opk-nav">
+            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
+            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
+            <a class="opk-nav-link" href="#workflow"><span class="opk-nav-icon"></span>Workflow</a>
+            <a class="opk-nav-link" href="#data"><span class="opk-nav-icon"></span>Data</a>
+            <a class="opk-nav-link" href="#search"><span class="opk-nav-icon"></span>Search</a>
+            <a class="opk-nav-link is-active" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
+            <a class="opk-nav-link" href="#audit"><span class="opk-nav-icon"></span>Audit</a>
+            <a class="opk-nav-link" href="#jobs"><span class="opk-nav-icon"></span>Jobs</a>
+            <a class="opk-nav-link" href="#settings"><span class="opk-nav-icon"></span>Settings</a>
+        </nav>
+
+        <div class="opk-sidebar-status">
+            <span class="opk-status-dot is-ok"></span>
+            <span>Core boundary clean</span>
+        </div>
+    </aside>
+
+    <div class="opk-workspace">
+        <header class="opk-topbar">
+            <div>
+                <h1>Agent Access</h1>
+                <p>Discoverability, citation readiness, bot policy, and machine-readable public outputs.</p>
+            </div>
+            <div class="opk-topbar-actions">
+                <a class="opk-button opk-button-secondary" href="/llms.txt">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" /></svg>
+                    llms.txt
+                </a>
+                <a class="opk-button opk-button-primary" href="/api/openapi.json">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+                    OpenAPI
+                </a>
+            </div>
+        </header>
+
+        <section class="opk-metric-grid" aria-label="Agent readiness summary">
+            @foreach (var metric in Model.Metrics)
+            {
+                <article class="opk-metric">
+                    <span class="opk-metric-label">@metric.Label</span>
+                    <strong>@metric.Value</strong>
+                    <span class="opk-trend is-good">@metric.Detail</span>
+                </article>
+            }
+        </section>
+
+        <section class="opk-agent-grid">
+            <div class="opk-panel opk-panel-wide">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Machine-Readable Outputs</h2>
+                        <p>Public resources that let search engines, LLMs, RAG systems, and browser agents understand the portal.</p>
+                    </div>
+                </div>
+                <div class="opk-agent-output-grid">
+                    @foreach (var output in Model.Outputs)
+                    {
+                        <a class="opk-agent-output" href="@output.Url">
+                            <span class="opk-chip is-approved">@output.Status</span>
+                            <strong>@output.Label</strong>
+                            <small>@output.Url</small>
+                            <p>@output.Description</p>
+                        </a>
+                    }
+                </div>
+            </div>
+
+            <div class="opk-panel">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>AI Bot Policy</h2>
+                        <p>Crawler access defaults are explicit and visible.</p>
+                    </div>
+                </div>
+                <div class="opk-agent-policy-list">
+                    @foreach (var item in Model.Policy)
+                    {
+                        <div class="opk-agent-policy-item">
+                            <span>@item.Label</span>
+                            <strong>@item.Value</strong>
+                            <p>@item.Detail</p>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="opk-panel">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Readiness Alerts</h2>
+                        <p>Actions to review before enabling production-scale agent access.</p>
+                    </div>
+                </div>
+                <ul class="opk-check-list">
+                    @foreach (var alert in Model.Alerts)
+                    {
+                        <li><span class="opk-status-dot is-warn"></span>@alert</li>
+                    }
+                </ul>
+            </div>
+
+            <div class="opk-panel opk-panel-wide">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Public Output Pipeline</h2>
+                        <p>Publishing events regenerate agent-facing outputs with traceability and audit coverage.</p>
+                    </div>
+                </div>
+                <div class="opk-agent-pipeline">
+                    @foreach (var item in Model.Pipeline)
+                    {
+                        <div class="opk-agent-pipeline-step">
+                            <span class="opk-status-dot is-ok"></span>
+                            <div>
+                                <small>@item.Label</small>
+                                <strong>@item.Value</strong>
+                                <p>@item.Detail</p>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="opk-panel opk-panel-wide">
+                <div class="opk-panel-header">
+                    <div>
+                        <h2>Snapshot Coverage</h2>
+                        <p>Published content readiness for Markdown, JSON, llms.txt, and crawler policy surfaces.</p>
+                    </div>
+                </div>
+                <div class="opk-table-wrap">
+                    <table class="opk-table opk-agent-table">
+                        <thead>
+                            <tr>
+                                <th>Content</th>
+                                <th>Markdown</th>
+                                <th>JSON</th>
+                                <th>llms.txt</th>
+                                <th>Policy</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model.SnapshotCoverage)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@item.Title</strong>
+                                        <span>@item.Path</span>
+                                    </td>
+                                    <td><span class="opk-chip is-approved">@item.Markdown</span></td>
+                                    <td><span class="opk-chip is-approved">@item.Json</span></td>
+                                    <td><span class="opk-chip is-approved">@item.Llms</span></td>
+                                    <td>@item.Policy</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+</section>

@@ -21,6 +21,7 @@ Test projects should be added beside this file as features become executable.
 ## Current Test Projects
 
 - `OpenPortalKit.Kernel.Tests`: package-free executable tests for early kernel behavior.
+- `OpenPortalKit.Modules.AgentAccess.Tests`: package-free executable tests for Markdown snapshots, JSON snapshots, llms.txt, agent manifest, public OpenAPI, and bot policy normalization.
 - `OpenPortalKit.Modules.Content.Tests`: package-free executable tests for generic content publishing behavior.
 - `OpenPortalKit.Modules.Data.Tests`: package-free executable tests for structured data imports, CSV import/export, traceability, checksum change detection, dry runs, snapshots, and public dataset queries.
 - `OpenPortalKit.Modules.Dashboard.Tests`: package-free executable tests for dashboard aggregation, alerts, privacy-conscious analytics events, session hashing, IP anonymization, bot classification, snapshot caching, Prometheus export, .NET metrics publishing, and PostgreSQL migration guardrails.

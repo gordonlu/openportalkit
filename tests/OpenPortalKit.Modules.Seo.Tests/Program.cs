@@ -1,3 +1,4 @@
+using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Publishing;
 using OpenPortalKit.Modules.Seo.PublicResources;
@@ -123,6 +124,9 @@ static Task RobotsTxtIncludesCrawlerDirectivesAndSitemap()
     Assert.Contains("User-agent: *", txt);
     Assert.Contains("Allow: /", txt);
     Assert.Contains("Disallow: /admin", txt);
+    Assert.Contains("Crawl-delay: 2", RobotsTxtGenerator.Generate(new RobotsPolicy(
+        new Uri("https://example.com/sitemap.xml"),
+        new[] { new RobotsDirective("*", new[] { "/" }, new[] { "/admin" }, CrawlDelaySeconds: 2) })));
     Assert.Contains("Sitemap: https://example.com/sitemap.xml", txt);
 
     return Task.CompletedTask;
@@ -202,12 +206,20 @@ static Task PublishingRevalidationPlannerIncludesPublicRoutesAndOutputs()
 
     Assert.Equal(PublishingEventNames.ContentPublished, plan.SourceEventName);
     Assert.Contains("/content/launch-notes", plan.Routes);
+    Assert.Contains("/content/launch-notes.md", plan.Routes);
+    Assert.Contains("/api/public/content/launch-notes.json", plan.Routes);
     Assert.Contains("/content", plan.Routes);
+    Assert.Contains("/api/public/content", plan.Routes);
     Assert.Contains("/sitemap.xml", plan.Routes);
     Assert.Contains("/rss.xml", plan.Routes);
+    Assert.Contains("/llms.txt", plan.Routes);
+    Assert.Contains("/llms-full.txt", plan.Routes);
     Assert.True(plan.RegenerateSitemap, "Expected sitemap regeneration.");
     Assert.True(plan.RegenerateRss, "Expected RSS regeneration.");
     Assert.True(plan.RegenerateSnapshots, "Expected Markdown/JSON snapshot regeneration.");
+    Assert.True(plan.RegenerateLlmsText, "Expected llms.txt regeneration.");
+    Assert.Contains("/content/launch-notes.md", plan.SnapshotRoutes ?? Array.Empty<string>());
+    Assert.Contains("/api/public/content/launch-notes.json", plan.SnapshotRoutes ?? Array.Empty<string>());
     Assert.True(plan.InvalidateRouteCache, "Expected route cache invalidation.");
     Assert.True(plan.WarmImportantPages, "Expected important public pages to be warmed.");
 
@@ -217,9 +229,11 @@ static Task PublishingRevalidationPlannerIncludesPublicRoutesAndOutputs()
 static async Task PublishingRevalidationHandlerRecordsIdempotentResult()
 {
     var store = new InMemoryPublicOutputRevalidationStore();
+    var auditStore = new InMemoryAuditLogStore();
     var executor = new RecordingPublicOutputRevalidationExecutor(
         store,
-        () => new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero));
+        () => new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero),
+        new AuditRecorder(auditStore));
     var handler = new PublishingRevalidationOutboxHandler(new PublishingRevalidationPlanner(), executor);
     var message = CreateOutboxMessage(PublishingEventNames.ContentPublished, "launch-notes");
 
@@ -231,10 +245,19 @@ static async Task PublishingRevalidationHandlerRecordsIdempotentResult()
     Assert.Equal(1, results.Count);
     Assert.True(results[0].Succeeded, "Expected revalidation to succeed.");
     Assert.Contains("/content/launch-notes", results[0].InvalidatedRoutes);
+    Assert.Contains("/content/launch-notes.md", results[0].InvalidatedRoutes);
+    Assert.Contains("/api/public/content/launch-notes.json", results[0].InvalidatedRoutes);
     Assert.Contains("sitemap.xml", results[0].RegeneratedOutputs);
     Assert.Contains("rss.xml", results[0].RegeneratedOutputs);
-    Assert.Contains("markdown-snapshot", results[0].RegeneratedOutputs);
-    Assert.Contains("json-snapshot", results[0].RegeneratedOutputs);
+    Assert.Contains("/content/launch-notes.md", results[0].RegeneratedOutputs);
+    Assert.Contains("/api/public/content/launch-notes.json", results[0].RegeneratedOutputs);
+    Assert.Contains("llms.txt", results[0].RegeneratedOutputs);
+    Assert.Contains("llms-full.txt", results[0].RegeneratedOutputs);
+
+    var auditLogs = await auditStore.FindByTargetAsync("PublicOutput", "content:launch-notes:published");
+    Assert.Equal(1, auditLogs.Count);
+    Assert.Equal("public-output.revalidated", auditLogs[0].Action);
+    Assert.Contains("llms.txt", auditLogs[0].MetadataJson ?? string.Empty);
 }
 
 static OutboxMessage CreateOutboxMessage(string eventName, string slug)

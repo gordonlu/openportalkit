@@ -1,11 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
-    <ProjectReference Include="..\OpenPortalKit.Modules.Seo\OpenPortalKit.Modules.Seo.csproj" />
+    <ProjectReference Include="..\..\src\OpenPortalKit.Modules.AgentAccess\OpenPortalKit.Modules.AgentAccess.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

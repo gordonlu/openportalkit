@@ -19,6 +19,7 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - Structured data dataset, schema version, import batch, CSV import/export, record traceability, checksum, dry run, quality report, snapshot, and public query contracts
 - Search abstraction with in-memory provider, public/admin visibility rules, filters, repeatable reindexing, and outbox-driven indexing hook
 - Dashboard and analytics contracts with privacy-conscious event capture, AgentSEO readiness summaries, runtime health aggregation, dependency health probes, cached summaries, Prometheus text export, and .NET metrics publishing
+- Agent Access / AgentSEO contracts for Markdown snapshots, JSON snapshots, llms.txt, llms-full.txt, agent manifest, public OpenAPI, and AI bot policy
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs
@@ -63,6 +64,13 @@ The API host exposes:
 - `/robots.txt`
 - `/sitemap.xml`
 - `/rss.xml`
+- `/llms.txt`
+- `/llms-full.txt`
+- `/.well-known/agent.json`
+- `/api/openapi.json`
+- `/api/public/content`
+- `/api/public/content/{slug}.json`
+- `/content/{slug}.md`
 - `/api/public/redirects/resolve`
 - `/api/public/datasets`
 - `/api/public/datasets/{code}`
@@ -85,6 +93,7 @@ The admin host exposes:
 - `/analytics/events`
 
 R7 dashboard and analytics notes are in `docs/r7-dashboard-analytics.md`.
+R8 Agent Access and AgentSEO notes are in `docs/r8-agent-access.md`.
 
 ## Product Boundary
 

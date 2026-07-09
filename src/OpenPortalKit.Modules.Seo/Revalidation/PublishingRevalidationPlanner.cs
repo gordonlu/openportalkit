@@ -25,34 +25,64 @@ public sealed class PublishingRevalidationPlanner
     {
         var slug = ReadRequiredString(message.PayloadJson, "Slug");
         var path = "/content/" + CanonicalUrlBuilder.NormalizePath(slug).Trim('/');
+        var markdownSnapshot = path + ".md";
+        var jsonSnapshot = "/api/public/content/" + path.Split('/').Last() + ".json";
 
         return new PublicOutputRevalidationPlan(
             message.EventName,
             message.IdempotencyKey,
             message.OccurredAt,
-            new[] { path, "/content", "/sitemap.xml", "/rss.xml" },
+            new[]
+            {
+                path,
+                markdownSnapshot,
+                jsonSnapshot,
+                "/content",
+                "/api/public/content",
+                "/sitemap.xml",
+                "/rss.xml",
+                "/llms.txt",
+                "/llms-full.txt"
+            },
             RegenerateSitemap: true,
             RegenerateRss: true,
             RegenerateSnapshots: true,
             InvalidateRouteCache: true,
-            WarmImportantPages: true);
+            WarmImportantPages: true,
+            SnapshotRoutes: new[] { markdownSnapshot, jsonSnapshot },
+            RegenerateLlmsText: true);
     }
 
     private static PublicOutputRevalidationPlan CreateContentArchivedPlan(OutboxMessage message)
     {
         var slug = ReadRequiredString(message.PayloadJson, "Slug");
         var path = "/content/" + CanonicalUrlBuilder.NormalizePath(slug).Trim('/');
+        var markdownSnapshot = path + ".md";
+        var jsonSnapshot = "/api/public/content/" + path.Split('/').Last() + ".json";
 
         return new PublicOutputRevalidationPlan(
             message.EventName,
             message.IdempotencyKey,
             message.OccurredAt,
-            new[] { path, "/content", "/sitemap.xml", "/rss.xml" },
+            new[]
+            {
+                path,
+                markdownSnapshot,
+                jsonSnapshot,
+                "/content",
+                "/api/public/content",
+                "/sitemap.xml",
+                "/rss.xml",
+                "/llms.txt",
+                "/llms-full.txt"
+            },
             RegenerateSitemap: true,
             RegenerateRss: true,
             RegenerateSnapshots: false,
             InvalidateRouteCache: true,
-            WarmImportantPages: false);
+            WarmImportantPages: false,
+            SnapshotRoutes: Array.Empty<string>(),
+            RegenerateLlmsText: true);
     }
 
     private static string ReadRequiredString(string payloadJson, string propertyName)

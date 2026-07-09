@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Modules.AgentAccess;
+using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
 using OpenPortalKit.Modules.Content;
+using OpenPortalKit.Modules.Content.ContentItems;
 using OpenPortalKit.Modules.Dashboard;
 using OpenPortalKit.Modules.Dashboard.Analytics;
 using OpenPortalKit.Modules.Dashboard.Storage;
@@ -27,6 +29,8 @@ builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
 builder.Services.Configure<AnalyticsPrivacyOptions>(
     builder.Configuration.GetSection(AnalyticsPrivacyOptions.SectionName));
+builder.Services.Configure<AgentBotPolicyOptions>(
+    builder.Configuration.GetSection(AgentBotPolicyOptions.SectionName));
 var dashboardPostgres = builder.Configuration
     .GetSection(DashboardPostgresStorageOptions.SectionName)
     .Get<DashboardPostgresStorageOptions>() ?? new DashboardPostgresStorageOptions();
@@ -51,6 +55,7 @@ builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
     new AnalyticsEventFactory(provider.GetRequiredService<IOptions<AnalyticsPrivacyOptions>>().Value));
 builder.Services.AddSingleton<ApiAnalyticsCaptureQueue>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ApiAnalyticsCaptureQueue>());
+builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore());
 
 var app = builder.Build();
 
@@ -126,21 +131,27 @@ app.MapGet("/api/system/storage", (IConfiguration configuration) =>
     };
 });
 
-app.MapGet("/api/public", () => new
+app.MapGet("/api/public", (HttpRequest request) =>
 {
-    Name = "OpenPortalKit Public API",
-    Status = "initialized",
-    Planned = new[]
+    var siteBaseUrl = GetSiteBaseUrl(request);
+
+    return new
     {
-        "content",
-        "datasets",
-        "search",
-        "sitemap",
-        "rss",
-        "markdown-snapshots",
-        "json-snapshots",
-        "openapi"
-    }
+        Name = "OpenPortalKit Public API",
+        Status = "ready",
+        Resources = new[]
+        {
+            new { Rel = "content", Href = new Uri(siteBaseUrl, "/api/public/content").ToString() },
+            new { Rel = "datasets", Href = new Uri(siteBaseUrl, "/api/public/datasets").ToString() },
+            new { Rel = "search", Href = new Uri(siteBaseUrl, "/api/public/search").ToString() },
+            new { Rel = "sitemap", Href = new Uri(siteBaseUrl, "/sitemap.xml").ToString() },
+            new { Rel = "rss", Href = new Uri(siteBaseUrl, "/rss.xml").ToString() },
+            new { Rel = "llms", Href = new Uri(siteBaseUrl, "/llms.txt").ToString() },
+            new { Rel = "llms-full", Href = new Uri(siteBaseUrl, "/llms-full.txt").ToString() },
+            new { Rel = "agent-manifest", Href = new Uri(siteBaseUrl, "/.well-known/agent.json").ToString() },
+            new { Rel = "openapi", Href = new Uri(siteBaseUrl, "/api/openapi.json").ToString() }
+        }
+    };
 });
 
 app.MapGet("/analytics/client.js", () => Results.Text(BuildAnalyticsClientScript(), "text/javascript; charset=utf-8"));
@@ -189,23 +200,21 @@ app.MapPost("/analytics/events", async (
     });
 });
 
-app.MapGet("/robots.txt", (HttpRequest request) =>
+app.MapGet("/robots.txt", (HttpRequest request, IOptions<AgentBotPolicyOptions> botPolicyOptions) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
     var policy = new RobotsPolicy(
         new Uri(siteBaseUrl, "/sitemap.xml"),
-        new[]
-        {
-            new RobotsDirective("*", new[] { "/" }, new[] { "/admin", "/api/system" })
-        });
+        BuildRobotsDirectives(botPolicyOptions.Value.ToPolicy()));
 
     return Results.Text(RobotsTxtGenerator.Generate(policy), "text/plain");
 });
 
-app.MapGet("/sitemap.xml", (HttpRequest request) =>
+app.MapGet("/sitemap.xml", async (HttpRequest request, IContentItemStore contentStore) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
-    var entries = GetSamplePublicResources()
+    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore);
+    var entries = resources
         .Select(resource => new SitemapEntry(
             CanonicalUrlBuilder.Build(siteBaseUrl, resource.Path),
             resource.UpdatedAt,
@@ -215,10 +224,10 @@ app.MapGet("/sitemap.xml", (HttpRequest request) =>
     return Results.Text(SitemapXmlGenerator.Generate(entries), "application/xml");
 });
 
-app.MapGet("/rss.xml", (HttpRequest request) =>
+app.MapGet("/rss.xml", async (HttpRequest request, IContentItemStore contentStore) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
-    var resources = GetSamplePublicResources();
+    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore);
     var feed = new RssFeed(
         "OpenPortalKit Public Feed",
         "Latest public OpenPortalKit content.",
@@ -235,9 +244,86 @@ app.MapGet("/rss.xml", (HttpRequest request) =>
     return Results.Text(RssXmlGenerator.Generate(feed), "application/rss+xml");
 });
 
+app.MapGet("/llms.txt", async (HttpRequest request, IContentItemStore contentStore) =>
+{
+    var profile = BuildAgentSiteProfile(request);
+    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore);
+
+    return Results.Text(LlmsTextGenerator.Generate(profile, documents, includeFullContent: false), "text/plain; charset=utf-8");
+});
+
+app.MapGet("/llms-full.txt", async (HttpRequest request, IContentItemStore contentStore) =>
+{
+    var profile = BuildAgentSiteProfile(request);
+    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore);
+
+    return Results.Text(LlmsTextGenerator.Generate(profile, documents, includeFullContent: true), "text/plain; charset=utf-8");
+});
+
+app.MapGet("/.well-known/agent.json", (
+    HttpRequest request,
+    IOptions<AgentBotPolicyOptions> botPolicyOptions) =>
+{
+    var profile = BuildAgentSiteProfile(request);
+    var manifest = AgentManifestGenerator.GenerateJson(
+        profile,
+        botPolicyOptions.Value.ToPolicy(),
+        new Uri(profile.BaseUrl, "/api/public/search"),
+        GetSampleDataSets()
+            .Select(dataSet => new AgentLink(dataSet.Name, new Uri(profile.BaseUrl, "/api/public/datasets/" + dataSet.Code), dataSet.Description))
+            .ToArray());
+
+    return Results.Text(manifest, "application/json; charset=utf-8");
+});
+
+app.MapGet("/api/openapi.json", (HttpRequest request) =>
+{
+    return Results.Text(AgentOpenApiGenerator.Generate(BuildAgentSiteProfile(request)), "application/json; charset=utf-8");
+});
+
+app.MapGet("/api/public/content", async (HttpRequest request, IContentItemStore contentStore) =>
+{
+    var siteBaseUrl = GetSiteBaseUrl(request);
+    var documents = await GetAgentContentDocumentsAsync(siteBaseUrl, contentStore);
+
+    return documents
+        .Select(document => new
+        {
+            document.Id,
+            document.ContentType,
+            document.Title,
+            document.Slug,
+            document.Summary,
+            document.CanonicalUrl,
+            MarkdownSnapshot = new Uri(siteBaseUrl, "/content/" + document.Slug + ".md"),
+            JsonSnapshot = new Uri(siteBaseUrl, "/api/public/content/" + document.Slug + ".json"),
+            document.PublishedAt,
+            document.UpdatedAt,
+            document.VisibilityPolicy
+        });
+});
+
+app.MapGet("/content/{slug}.md", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
+{
+    var document = await FindAgentContentDocumentAsync(GetSiteBaseUrl(request), contentStore, slug);
+
+    return document is null
+        ? Results.NotFound()
+        : Results.Text(AgentSnapshotGenerator.GenerateMarkdown(document), "text/markdown; charset=utf-8");
+});
+
+app.MapGet("/api/public/content/{slug}.json", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
+{
+    var document = await FindAgentContentDocumentAsync(GetSiteBaseUrl(request), contentStore, slug);
+
+    return document is null
+        ? Results.NotFound()
+        : Results.Text(AgentSnapshotGenerator.GenerateJson(document), "application/json; charset=utf-8");
+});
+
 app.MapGet("/api/public/content/sample/metadata", (HttpRequest request) =>
 {
-    var resource = GetSamplePublicResources()[0];
+    var resource = GetSeedPublicResourceDescriptors()[0];
     return SeoPageMetadataBuilder.Build(resource, GetSiteBaseUrl(request), "OpenPortalKit");
 });
 
@@ -301,9 +387,9 @@ app.MapGet("/api/public/datasets/{code}/export.csv", async (string code) =>
         : Results.Text(CsvDataExporter.Export(detail.Records), "text/csv");
 });
 
-app.MapGet("/api/public/search", async (string q) =>
+app.MapGet("/api/public/search", async (string q, IContentItemStore contentStore) =>
 {
-    var index = await BuildSampleSearchIndexAsync();
+    var index = await BuildSampleSearchIndexAsync(contentStore);
     var results = await index.SearchAsync(new SearchQuery(q));
 
     return results.Select(result => new
@@ -318,9 +404,9 @@ app.MapGet("/api/public/search", async (string q) =>
     });
 });
 
-app.MapGet("/api/public/search/health", async () =>
+app.MapGet("/api/public/search/health", async (IContentItemStore contentStore) =>
 {
-    var index = await BuildSampleSearchIndexAsync();
+    var index = await BuildSampleSearchIndexAsync(contentStore);
     var results = await index.SearchAsync(new SearchQuery("sample"));
 
     return new
@@ -341,9 +427,14 @@ static bool IsPublicOutputRequest(HttpRequest request)
     }
 
     return request.Path.StartsWithSegments("/api/public", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.StartsWithSegments("/content", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/robots.txt", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/sitemap.xml", StringComparison.OrdinalIgnoreCase) ||
-        request.Path.Equals("/rss.xml", StringComparison.OrdinalIgnoreCase);
+        request.Path.Equals("/rss.xml", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/llms.txt", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/llms-full.txt", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/.well-known/agent.json", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.Equals("/api/openapi.json", StringComparison.OrdinalIgnoreCase);
 }
 
 static async Task<AnalyticsEvent> StoreAnalyticsEventAsync(
@@ -480,7 +571,230 @@ static Uri GetSiteBaseUrl(HttpRequest request)
     return new Uri($"{request.Scheme}://{request.Host}");
 }
 
-static IReadOnlyList<PublicResourceDescriptor> GetSamplePublicResources()
+static AgentSiteProfile BuildAgentSiteProfile(HttpRequest request)
+{
+    var siteBaseUrl = GetSiteBaseUrl(request);
+
+    return new AgentSiteProfile(
+        "OpenPortalKit Public Portal",
+        "Public publishing outputs for crawlable pages, structured data, machine-readable snapshots, and agent-friendly discovery.",
+        siteBaseUrl,
+        new[]
+        {
+            new AgentSection("Content", new Uri(siteBaseUrl, "/api/public/content"), "Published public content with Markdown and JSON snapshots."),
+            new AgentSection("Datasets", new Uri(siteBaseUrl, "/api/public/datasets"), "Public structured datasets with schema and traceable records."),
+            new AgentSection("Search", new Uri(siteBaseUrl, "/api/public/search"), "Read-only public search across published content and datasets.")
+        },
+        new[]
+        {
+            new AgentLink("Public API", new Uri(siteBaseUrl, "/api/public"), "Discovery document for public read endpoints."),
+            new AgentLink("Sitemap", new Uri(siteBaseUrl, "/sitemap.xml"), "Crawlable XML sitemap."),
+            new AgentLink("RSS feed", new Uri(siteBaseUrl, "/rss.xml"), "Latest public publishing feed."),
+            new AgentLink("OpenAPI", new Uri(siteBaseUrl, "/api/openapi.json"), "OpenAPI description for public read endpoints.")
+        },
+        new Uri(siteBaseUrl, "/sitemap.xml"),
+        new Uri(siteBaseUrl, "/rss.xml"),
+        new Uri(siteBaseUrl, "/api/public"),
+        new Uri(siteBaseUrl, "/api/openapi.json"),
+        new Uri(siteBaseUrl, "/llms.txt"),
+        new Uri(siteBaseUrl, "/llms-full.txt"),
+        new Uri(siteBaseUrl, "/.well-known/agent.json"),
+        "Public content and dataset endpoints are read-only. Automated systems should respect robots.txt, attribution requirements, and endpoint rate limits.",
+        "When citing content, include the canonical URL and preserve source attribution where provided.");
+}
+
+static IReadOnlyList<RobotsDirective> BuildRobotsDirectives(AgentBotPolicy policy)
+{
+    var directives = new List<RobotsDirective>
+    {
+        new(
+            "*",
+            policy.AllowSearchBots ? new[] { "/" } : Array.Empty<string>(),
+            policy.AllowSearchBots ? new[] { "/admin", "/api/system" } : new[] { "/" },
+            policy.CrawlDelaySeconds)
+    };
+
+    foreach (var userAgent in new[] { "GPTBot", "CCBot", "Google-Extended", "anthropic-ai", "ClaudeBot" })
+    {
+        directives.Add(new RobotsDirective(
+            userAgent,
+            policy.AllowTrainingBots ? new[] { "/" } : Array.Empty<string>(),
+            policy.AllowTrainingBots ? new[] { "/admin", "/api/system" } : new[] { "/" },
+            policy.CrawlDelaySeconds));
+    }
+
+    foreach (var userAgent in policy.AllowedUserAgents)
+    {
+        directives.Add(new RobotsDirective(
+            userAgent,
+            new[] { "/" },
+            new[] { "/admin", "/api/system" },
+            policy.CrawlDelaySeconds));
+    }
+
+    return directives;
+}
+
+static Guid GetDefaultSiteId()
+{
+    return Guid.Parse("22222222-2222-2222-2222-222222222222");
+}
+
+static Guid GetDefaultContentTypeId()
+{
+    return Guid.Parse("33333333-3333-3333-3333-333333333333");
+}
+
+static IContentItemStore BuildSeedContentItemStore()
+{
+    var store = new InMemoryContentItemStore();
+
+    foreach (var item in GetSeedContentItems())
+    {
+        store.AddAsync(item).GetAwaiter().GetResult();
+    }
+
+    return store;
+}
+
+static IReadOnlyList<ContentItem> GetSeedContentItems()
+{
+    var siteId = GetDefaultSiteId();
+    var contentTypeId = GetDefaultContentTypeId();
+    var actorId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+    return GetSeedPublicResourceDescriptors()
+        .Select((resource, index) => new ContentItem(
+            Guid.Parse(index == 0 ? "11111111-1111-1111-1111-111111111111" : "12121212-1212-1212-1212-121212121212"),
+            siteId,
+            contentTypeId,
+            resource.Title,
+            resource.Path.Trim('/').Split('/').Last(),
+            resource.Description,
+            BuildSampleContentBody(resource.Title),
+            CoverAssetId: null,
+            ContentPublicationStatus.Published,
+            CategoryId: null,
+            new[] { "publishing", "agent-readiness", "public-output" },
+            AuthorId: actorId,
+            "OpenPortalKit seeded public content",
+            resource.PublishedAt,
+            ScheduledAt: null,
+            ExpiresAt: null,
+            actorId,
+            actorId,
+            resource.PublishedAt.AddHours(-1),
+            resource.UpdatedAt))
+        .ToArray();
+}
+
+static IReadOnlyList<PublicResourceDescriptor> GetSeedPublicResourceDescriptors()
+{
+    return new[]
+    {
+        new PublicResourceDescriptor(
+            "OpenPortalKit Launch Notes",
+            "A crawlable public content resource for SEO baseline validation.",
+            "/content/launch-notes",
+            new DateTimeOffset(2026, 7, 8, 9, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 7, 8, 10, 0, 0, TimeSpan.Zero),
+            "en-US"),
+        new PublicResourceDescriptor(
+            "Publishing Health Overview",
+            "A public resource used to validate sitemap and RSS generation.",
+            "/content/publishing-health-overview",
+            new DateTimeOffset(2026, 7, 8, 9, 30, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 7, 8, 10, 30, 0, TimeSpan.Zero),
+            "en-US")
+    };
+}
+
+static async Task<IReadOnlyList<PublicResourceDescriptor>> GetPublicResourceDescriptorsAsync(
+    Uri siteBaseUrl,
+    IContentItemStore contentStore)
+{
+    var query = new PublicContentQueryService(contentStore);
+    var items = await query.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
+
+    return items
+        .Select(item => new PublicResourceDescriptor(
+            item.Title,
+            item.Summary,
+            CanonicalUrlBuilder.NormalizePath("/content/" + item.Slug),
+            item.PublishedAt,
+            item.UpdatedAt,
+            "en-US"))
+        .ToArray();
+}
+
+static async Task<IReadOnlyList<AgentContentDocument>> GetAgentContentDocumentsAsync(
+    Uri siteBaseUrl,
+    IContentItemStore contentStore)
+{
+    var query = new PublicContentQueryService(contentStore);
+    var summaries = await query.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
+    var documents = new List<AgentContentDocument>();
+
+    foreach (var summary in summaries)
+    {
+        var detail = await query.FindPublishedBySlugAsync(summary.SiteId, summary.Slug);
+        if (detail is not null)
+        {
+            documents.Add(BuildAgentContentDocument(detail, siteBaseUrl));
+        }
+    }
+
+    return documents;
+}
+
+static async Task<AgentContentDocument?> FindAgentContentDocumentAsync(
+    Uri siteBaseUrl,
+    IContentItemStore contentStore,
+    string slug)
+{
+    var query = new PublicContentQueryService(contentStore);
+    var detail = await query.FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
+
+    return detail is null ? null : BuildAgentContentDocument(detail, siteBaseUrl);
+}
+
+static AgentContentDocument BuildAgentContentDocument(PublicContentDetail detail, Uri siteBaseUrl)
+{
+    return new AgentContentDocument(
+        "content:" + detail.Slug,
+        "Article",
+        detail.Title,
+        detail.Slug,
+        detail.Summary,
+        detail.Body,
+        CanonicalUrlBuilder.Build(siteBaseUrl, "/content/" + detail.Slug),
+        detail.PublishedAt,
+        detail.UpdatedAt,
+        "OpenPortalKit Editorial",
+        detail.Source,
+        detail.Tags,
+        new[]
+        {
+            "Public outputs include HTML, XML feeds, Markdown snapshots, JSON snapshots, and API descriptions.",
+            "Machine-readable resources must preserve canonical URLs and source attribution.",
+            "Agent-facing access is governed by robots.txt and the agent manifest."
+        },
+        new[]
+        {
+            new AgentLink("Public API discovery", new Uri(siteBaseUrl, "/api/public"), "Read-only endpoint catalog."),
+            new AgentLink("llms.txt", new Uri(siteBaseUrl, "/llms.txt"), "Concise LLM discovery file.")
+        },
+        new[]
+        {
+            new AgentLink("Sitemap", new Uri(siteBaseUrl, "/sitemap.xml"), "Crawlable public URL inventory."),
+            new AgentLink("RSS feed", new Uri(siteBaseUrl, "/rss.xml"), "Public publishing feed.")
+        },
+        AgentVisibilityPolicy.Default,
+        "This public snapshot may be used for search indexing, citation, and retrieval-augmented generation when the canonical URL and source attribution are preserved.");
+}
+
+#pragma warning disable CS8321
+static IReadOnlyList<PublicResourceDescriptor> GetSamplePublicResourcesLegacy()
 {
     return new[]
     {
@@ -500,6 +814,58 @@ static IReadOnlyList<PublicResourceDescriptor> GetSamplePublicResources()
             "en-US")
     };
 }
+
+static AgentContentDocument BuildSampleAgentContentDocumentLegacy(PublicResourceDescriptor resource, Uri siteBaseUrl)
+{
+    var slug = resource.Path.Trim('/').Split('/').Last();
+    var canonicalUrl = CanonicalUrlBuilder.Build(siteBaseUrl, resource.Path);
+    var source = "OpenPortalKit sample publishing seed";
+
+    return new AgentContentDocument(
+        "content:" + slug,
+        "Article",
+        resource.Title,
+        slug,
+        resource.Description,
+        BuildSampleContentBody(resource.Title),
+        canonicalUrl,
+        resource.PublishedAt,
+        resource.UpdatedAt,
+        "OpenPortalKit Editorial",
+        source,
+        new[] { "publishing", "agent-readiness", "public-output" },
+        new[]
+        {
+            "Public outputs include HTML, XML feeds, Markdown snapshots, JSON snapshots, and API descriptions.",
+            "Machine-readable resources must preserve canonical URLs and source attribution.",
+            "Agent-facing access is governed by robots.txt and the agent manifest."
+        },
+        new[]
+        {
+            new AgentLink("Public API discovery", new Uri(siteBaseUrl, "/api/public"), "Read-only endpoint catalog."),
+            new AgentLink("llms.txt", new Uri(siteBaseUrl, "/llms.txt"), "Concise LLM discovery file.")
+        },
+        new[]
+        {
+            new AgentLink("Sitemap", new Uri(siteBaseUrl, "/sitemap.xml"), "Crawlable public URL inventory."),
+            new AgentLink("RSS feed", new Uri(siteBaseUrl, "/rss.xml"), "Public publishing feed.")
+        },
+        AgentVisibilityPolicy.Default,
+        "This public snapshot may be used for search indexing, citation, and retrieval-augmented generation when the canonical URL and source attribution are preserved.");
+}
+
+static string BuildSampleContentBody(string title)
+{
+    return $"""
+    {title} explains how OpenPortalKit publishes content in formats that are usable by people, search engines, LLMs, RAG systems, and browser agents.
+
+    The public output set includes crawlable HTML routes, sitemap and RSS discovery, clean Markdown snapshots, JSON snapshots with traceability fields, and an OpenAPI description for read-only public endpoints.
+
+    The content is designed to be citable. Agents should use canonical URLs, preserve source attribution, and respect robots.txt and the agent manifest before automated collection.
+    """;
+}
+
+#pragma warning restore CS8321
 
 static IRedirectRuleStore GetSampleRedirectRuleStore()
 {
@@ -577,29 +943,31 @@ static async Task<SampleDataContext> BuildSampleDataContextAsync()
     return new SampleDataContext(dataSet.SiteId, dataSetStore, recordStore);
 }
 
-static async Task<ISearchIndex> BuildSampleSearchIndexAsync()
+static async Task<ISearchIndex> BuildSampleSearchIndexAsync(IContentItemStore contentStore)
 {
     var index = new InMemorySearchIndex();
     var siteBase = new Uri("https://example.test");
     var samplePublishedAt = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero);
+    var publicContent = new PublicContentQueryService(contentStore);
+    var contentItems = await publicContent.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
 
-    foreach (var resource in GetSamplePublicResources())
+    foreach (var item in contentItems)
     {
         await index.UpsertAsync(new SearchDocument(
-            "content:" + resource.Path.Trim('/'),
+            "content:" + item.Slug,
             "ContentItem",
-            resource.Path.Trim('/'),
-            resource.Title,
-            resource.Description,
-            resource.Description,
-            CanonicalUrlBuilder.Build(siteBase, resource.Path).PathAndQuery,
+            item.Id.ToString(),
+            item.Title,
+            item.Summary,
+            item.Summary,
+            CanonicalUrlBuilder.Build(siteBase, "/content/" + item.Slug).PathAndQuery,
             "content",
-            Array.Empty<string>(),
+            item.Tags,
             Category: null,
-            samplePublishedAt,
-            resource.UpdatedAt,
+            item.PublishedAt,
+            item.UpdatedAt,
             SearchVisibility.Public,
-            resource.Language,
+            "en-US",
             MetadataJson: null));
     }
 

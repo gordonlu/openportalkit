@@ -599,6 +599,131 @@ a:focus-visible {
   align-items: start;
 }
 
+.opk-agent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.55fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.opk-agent-output-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.opk-agent-output {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 154px;
+  padding: 14px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: var(--opk-surface-2);
+  color: var(--opk-text);
+  text-decoration: none;
+}
+
+.opk-agent-output:hover {
+  border-color: var(--opk-border-strong);
+  color: var(--opk-text);
+}
+
+.opk-agent-output .opk-chip {
+  justify-self: start;
+}
+
+.opk-agent-output strong {
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.opk-agent-output small {
+  overflow-wrap: anywhere;
+  color: var(--opk-muted);
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.opk-agent-output p,
+.opk-agent-policy-item p {
+  margin: 0;
+  color: var(--opk-muted);
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.opk-agent-policy-list {
+  display: grid;
+  gap: 10px;
+}
+
+.opk-agent-pipeline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.opk-agent-pipeline-step {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: var(--opk-surface-2);
+}
+
+.opk-agent-pipeline-step small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--opk-muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.opk-agent-pipeline-step strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.9rem;
+}
+
+.opk-agent-pipeline-step p {
+  margin: 0;
+  color: var(--opk-muted);
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.opk-agent-policy-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #edf0f3;
+  border-radius: 8px;
+  background: var(--opk-surface-2);
+}
+
+.opk-agent-policy-item span {
+  color: var(--opk-muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.opk-agent-policy-item strong {
+  font-size: 0.92rem;
+  font-weight: 780;
+}
+
+.opk-agent-table td:last-child {
+  color: var(--opk-muted);
+  font-weight: 650;
+}
+
 .opk-content-main,
 .opk-inspector {
   min-width: 0;
@@ -759,6 +884,12 @@ a:focus-visible {
   }
 
   .opk-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .opk-agent-grid,
+  .opk-agent-output-grid,
+  .opk-agent-pipeline {
     grid-template-columns: 1fr;
   }
 
