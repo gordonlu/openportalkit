@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
+using System.Data.Common;
+using Npgsql;
 using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
@@ -23,6 +25,7 @@ using OpenPortalKit.Modules.Workflow;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
 
 builder.Services.AddHealthChecks();
 builder.Services.Configure<OpenPortalKitStorageOptions>(
@@ -41,6 +44,16 @@ if (string.IsNullOrWhiteSpace(dashboardPostgres.ConnectionString))
 }
 
 builder.Services.AddSingleton(dashboardPostgres);
+var agentOutputPostgres = builder.Configuration
+    .GetSection(AgentOutputPostgresStorageOptions.SectionName)
+    .Get<AgentOutputPostgresStorageOptions>() ?? new AgentOutputPostgresStorageOptions();
+if (string.IsNullOrWhiteSpace(agentOutputPostgres.ConnectionString))
+{
+    agentOutputPostgres.ConnectionString = builder.Configuration.GetConnectionString(
+        agentOutputPostgres.ConnectionStringName);
+}
+
+builder.Services.AddSingleton(agentOutputPostgres);
 if (dashboardPostgres.Enabled)
 {
     builder.Services.AddSingleton<IDashboardDbConnectionFactory, DashboardPostgresConnectionFactory>();
@@ -49,6 +62,15 @@ if (dashboardPostgres.Enabled)
 else
 {
     builder.Services.AddSingleton<IAnalyticsEventStore, InMemoryAnalyticsEventStore>();
+}
+if (agentOutputPostgres.Enabled)
+{
+    builder.Services.AddSingleton<IAgentOutputDbConnectionFactory, AgentOutputPostgresConnectionFactory>();
+    builder.Services.AddSingleton<IAgentOutputArtifactStore, PostgresAgentOutputArtifactStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IAgentOutputArtifactStore, InMemoryAgentOutputArtifactStore>();
 }
 
 builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>

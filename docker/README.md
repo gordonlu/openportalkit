@@ -92,7 +92,7 @@ On networks where Docker Hub is slow or blocked, configure a Docker daemon proxy
 - PostgreSQL 17 on `localhost:5432`
 - Redis 8 on `localhost:6379`
 
-Default PostgreSQL connection string:
+Default PostgreSQL connection string (when `POSTGRES_PORT=5432`):
 
 ```txt
 Host=localhost;Port=5432;Database=openportalkit;Username=openportalkit;Password=openportalkit_dev
@@ -103,6 +103,19 @@ Default Redis connection string:
 ```txt
 localhost:6379
 ```
+
+## R8 Durable Delivery
+
+Apply R8 migrations after PostgreSQL starts:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U openportalkit -d openportalkit < db/postgresql/migrations/0008_agent_output_artifacts.sql
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U openportalkit -d openportalkit < db/postgresql/migrations/0009_publishing_delivery.sql
+```
+
+Set both `OpenPortalKit:Persistence:PostgreSQL:Enabled` and `OpenPortalKit:AgentAccess:PostgreSQL:Enabled` to `true` in AdminHost and JobHost before running the worker. JobHost refuses to start when either durable store is disabled.
 
 ## Health
 

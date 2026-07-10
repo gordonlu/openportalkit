@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.0" />
     <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Identity\OpenPortalKit.Modules.Identity.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />

@@ -39,11 +39,45 @@ public sealed class InMemoryOutboxMessageStore : IOutboxMessageStore
         lock (_gate)
         {
             var pending = _messages
-                .Where(message => message.ProcessedAt is null && message.AttemptCount < maxAttemptCount)
+                .Where(message => message.ProcessedAt is null &&
+                    message.AttemptCount < maxAttemptCount &&
+                    (message.LeaseExpiresAt is null || message.LeaseExpiresAt <= DateTimeOffset.UtcNow))
                 .OrderBy(message => message.OccurredAt)
                 .ThenBy(message => message.Id)
                 .Take(batchSize)
                 .ToArray();
+
+            return Task.FromResult<IReadOnlyList<OutboxMessage>>(pending);
+        }
+    }
+
+    public Task<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
+        int batchSize,
+        int maxAttemptCount,
+        DateTimeOffset leaseExpiresAt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAttemptCount);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var pending = _messages
+                .Where(message => message.ProcessedAt is null &&
+                    message.AttemptCount < maxAttemptCount &&
+                    (message.LeaseExpiresAt is null || message.LeaseExpiresAt <= now))
+                .OrderBy(message => message.OccurredAt)
+                .ThenBy(message => message.Id)
+                .Take(batchSize)
+                .Select(message => message with { LeaseExpiresAt = leaseExpiresAt })
+                .ToArray();
+
+            foreach (var message in pending)
+            {
+                Replace(message.Id, _ => message);
+            }
 
             return Task.FromResult<IReadOnlyList<OutboxMessage>>(pending);
         }
@@ -75,7 +109,8 @@ public sealed class InMemoryOutboxMessageStore : IOutboxMessageStore
             Replace(messageId, message => message with
             {
                 ProcessedAt = processedAt,
-                LastError = null
+                LastError = null,
+                LeaseExpiresAt = null
             });
         }
 
@@ -96,7 +131,8 @@ public sealed class InMemoryOutboxMessageStore : IOutboxMessageStore
             Replace(messageId, message => message with
             {
                 AttemptCount = message.AttemptCount + 1,
-                LastError = lastError
+                LastError = lastError,
+                LeaseExpiresAt = null
             });
         }
 

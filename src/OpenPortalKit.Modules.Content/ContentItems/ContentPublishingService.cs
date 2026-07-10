@@ -67,7 +67,13 @@ public sealed class ContentPublishingService
             candidate.SiteId,
             candidate.Id,
             candidate.Slug,
-            publishedAt);
+            publishedAt,
+            candidate.Title,
+            candidate.Summary,
+            candidate.Body,
+            candidate.Source,
+            candidate.Tags,
+            candidate.UpdatedAt);
 
         var outboxMessage = await _outboxMessageStore.AddAsync(
             OutboxMessageFactory.FromIntegrationEvent(integrationEvent),

@@ -8,4 +8,5 @@ public sealed record OutboxMessage(
     DateTimeOffset OccurredAt,
     DateTimeOffset? ProcessedAt,
     int AttemptCount,
-    string? LastError);
+    string? LastError,
+    DateTimeOffset? LeaseExpiresAt = null);

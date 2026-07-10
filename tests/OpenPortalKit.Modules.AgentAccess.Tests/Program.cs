@@ -11,7 +11,13 @@ var tests = new (string Name, Func<Task> Run)[]
     ("openapi document describes public read endpoints", OpenApiDocumentDescribesPublicReadEndpoints),
     ("bot policy options normalize allow list", BotPolicyOptionsNormalizeAllowList),
     ("artifact generator creates traceable snapshot artifacts", ArtifactGeneratorCreatesTraceableSnapshotArtifacts),
-    ("artifact regenerator stores outputs for revalidation plans", ArtifactRegeneratorStoresOutputsForRevalidationPlans)
+    ("artifact regenerator stores outputs for revalidation plans", ArtifactRegeneratorStoresOutputsForRevalidationPlans),
+    ("publishing artifact factory resolves snapshot content", PublishingArtifactFactoryResolvesSnapshotContent),
+    ("publishing artifact factory skips archived snapshot generation", PublishingArtifactFactorySkipsArchivedSnapshotGeneration),
+    ("publishing event resolver preserves immutable public content", PublishingEventResolverPreservesImmutablePublicContent),
+    ("postgres migration preserves artifact traceability", PostgresMigrationPreservesArtifactTraceability),
+    ("postgres store SQL upserts traceable artifacts", PostgresStoreSqlUpsertsTraceableArtifacts),
+    ("admin host registers agent access stores", AdminHostRegistersAgentAccessStores)
 };
 
 var failed = 0;
@@ -173,6 +179,187 @@ static async Task ArtifactRegeneratorStoresOutputsForRevalidationPlans()
     Assert.True(paths.Contains("/api/public/content/launch-notes.json"), "Expected JSON path.");
 }
 
+static async Task PublishingArtifactFactoryResolvesSnapshotContent()
+{
+    var resolver = new FixedAgentContentDocumentResolver(CreateDocument());
+    var generatedAt = new DateTimeOffset(2026, 7, 10, 5, 0, 0, TimeSpan.Zero);
+    var factory = new PublishingAgentOutputArtifactFactory(resolver, () => generatedAt);
+    var plan = new PublicOutputRevalidationPlan(
+        "content.published",
+        "content:launch-notes:published",
+        generatedAt,
+        new[] { "/content/launch-notes.md", "/api/public/content/launch-notes.json" },
+        RegenerateSitemap: true,
+        RegenerateRss: true,
+        RegenerateSnapshots: true,
+        InvalidateRouteCache: true,
+        WarmImportantPages: true,
+        SnapshotRoutes: new[] { "/content/launch-notes.md", "/api/public/content/launch-notes.json" },
+        RegenerateLlmsText: true);
+
+    var artifacts = await factory.CreateArtifactsAsync(plan);
+
+    Assert.Equal(1, resolver.Calls.Count);
+    Assert.Equal("launch-notes", resolver.Calls[0]);
+    Assert.Equal(2, artifacts.Count);
+    Assert.True(artifacts.Any(artifact => artifact.Path == "/content/launch-notes.md"), "Expected Markdown artifact.");
+    Assert.True(artifacts.Any(artifact => artifact.Path == "/api/public/content/launch-notes.json"), "Expected JSON artifact.");
+    Assert.True(artifacts.All(artifact => artifact.GeneratedAt == generatedAt), "Expected stable generated timestamp.");
+}
+
+static async Task PublishingArtifactFactorySkipsArchivedSnapshotGeneration()
+{
+    var resolver = new FixedAgentContentDocumentResolver(CreateDocument());
+    var factory = new PublishingAgentOutputArtifactFactory(resolver);
+    var plan = new PublicOutputRevalidationPlan(
+        "content.archived",
+        "content:launch-notes:archived",
+        DateTimeOffset.UtcNow,
+        new[] { "/content/launch-notes.md", "/api/public/content/launch-notes.json" },
+        RegenerateSitemap: true,
+        RegenerateRss: true,
+        RegenerateSnapshots: false,
+        InvalidateRouteCache: true,
+        WarmImportantPages: false,
+        SnapshotRoutes: Array.Empty<string>(),
+        RegenerateLlmsText: true);
+
+    var artifacts = await factory.CreateArtifactsAsync(plan);
+
+    Assert.Equal(0, artifacts.Count);
+    Assert.Equal(0, resolver.Calls.Count);
+}
+
+static async Task PublishingEventResolverPreservesImmutablePublicContent()
+{
+    var generatedAt = new DateTimeOffset(2026, 7, 10, 6, 0, 0, TimeSpan.Zero);
+    var payload = JsonSerializer.Serialize(new
+    {
+        ContentItemId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        Slug = "launch-notes",
+        Title = "Launch Notes",
+        Summary = "Public launch summary.",
+        Body = "This body is suitable for retrieval and citation.",
+        Source = "Publishing event",
+        Tags = new[] { "agent", "publishing" },
+        PublishedAt = generatedAt,
+        UpdatedAt = generatedAt
+    });
+    var plan = new PublicOutputRevalidationPlan(
+        "ContentPublished",
+        "content:launch-notes:published",
+        generatedAt,
+        new[] { "/content/launch-notes.md" },
+        RegenerateSitemap: true,
+        RegenerateRss: true,
+        RegenerateSnapshots: true,
+        InvalidateRouteCache: true,
+        WarmImportantPages: true,
+        SnapshotRoutes: new[] { "/content/launch-notes.md" },
+        RegenerateLlmsText: true,
+        SourcePayloadJson: payload);
+    var resolver = new PublishingEventAgentContentDocumentResolver(new AgentOutputGenerationOptions
+    {
+        PublicBaseUrl = "https://portal.example",
+        AuthorDisplayName = "OpenPortalKit Editorial"
+    });
+
+    var document = await resolver.FindPublishedBySlugAsync(plan, "launch-notes");
+
+    Assert.Equal("content:11111111-1111-1111-1111-111111111111", document?.Id);
+    Assert.Equal("Launch Notes", document?.Title);
+    Assert.Equal("https://portal.example/content/launch-notes", document?.CanonicalUrl.ToString());
+    Assert.Equal("Publishing event", document?.Source);
+}
+
+static Task PostgresMigrationPreservesArtifactTraceability()
+{
+    var sql = File.ReadAllText(Path.Combine(
+        "db",
+        "postgresql",
+        "migrations",
+        "0008_agent_output_artifacts.sql"));
+
+    Assert.Contains("create table if not exists opk_agent_output_artifacts", sql);
+    Assert.Contains("path text primary key", sql);
+    Assert.Contains("source_id text not null", sql);
+    Assert.Contains("source_kind text not null", sql);
+    Assert.Contains("schema_version text not null", sql);
+    Assert.Contains("checksum text not null", sql);
+    Assert.Contains("generated_at timestamptz not null", sql);
+    Assert.Contains("ix_opk_agent_output_artifacts_source", sql);
+    Assert.Contains("ix_opk_agent_output_artifacts_checksum", sql);
+
+    return Task.CompletedTask;
+}
+
+static Task PostgresStoreSqlUpsertsTraceableArtifacts()
+{
+    var sql = string.Join(
+        "\n",
+        AgentOutputPostgresSql.UpsertArtifact,
+        AgentOutputPostgresSql.SelectArtifactByPath,
+        AgentOutputPostgresSql.SelectArtifacts);
+
+    Assert.Contains("opk_agent_output_artifacts", sql);
+    Assert.Contains("on conflict (path) do update", sql);
+    Assert.Contains("source_id", sql);
+    Assert.Contains("source_kind", sql);
+    Assert.Contains("schema_version", sql);
+    Assert.Contains("checksum", sql);
+    Assert.Contains("generated_at", sql);
+    Assert.Contains("updated_at = now()", sql);
+
+    return Task.CompletedTask;
+}
+
+static Task AdminHostRegistersAgentAccessStores()
+{
+    var apiProgram = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.ApiHost",
+        "Program.cs"));
+    var program = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.AdminHost",
+        "Program.cs"));
+    var jobProgram = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.JobHost",
+        "Program.cs"));
+    var pageModel = File.ReadAllText(Path.Combine(
+        "src",
+        "OpenPortalKit.AdminHost",
+        "Pages",
+        "AgentAccess",
+        "Index.cshtml.cs"));
+
+    Assert.Contains("AgentOutputPostgresStorageOptions", program);
+    Assert.Contains("IAgentOutputArtifactStore", program);
+    Assert.Contains("PostgresAgentOutputArtifactStore", program);
+    Assert.Contains("InMemoryAgentOutputArtifactStore", program);
+    Assert.Contains("AgentOutputPostgresStorageOptions", apiProgram);
+    Assert.Contains("PostgresAgentOutputArtifactStore", apiProgram);
+    Assert.Contains("InMemoryAgentOutputArtifactStore", apiProgram);
+    Assert.Contains("IPublicOutputRevalidationStore", program);
+    Assert.Contains("IPublicOutputRevalidationExecutor", program);
+    Assert.Contains("IPublicOutputRegenerator", program);
+    Assert.Contains("PublishingAgentOutputArtifactFactory", program);
+    Assert.Contains("PublishingEventAgentContentDocumentResolver", program);
+    Assert.Contains("ContentStoreAgentContentDocumentResolver", program);
+    Assert.Contains("IAuditLogStore", program);
+    Assert.Contains("PostgresOutboxMessageStore", program);
+    Assert.Contains("PostgresPublicOutputRevalidationStore", program);
+    Assert.Contains("PublishingOutboxWorker", jobProgram);
+    Assert.Contains("PostgresIdempotencyStore", jobProgram);
+    Assert.Contains("IOptions<AgentBotPolicyOptions>", pageModel);
+    Assert.Contains("OnGetAsync", pageModel);
+    Assert.DoesNotContain("SeedDevelopmentStateIfEmptyAsync", pageModel);
+    Assert.DoesNotContain("UpsertAsync", pageModel);
+
+    return Task.CompletedTask;
+}
+
 static AgentContentDocument CreateDocument()
 {
     return new AgentContentDocument(
@@ -262,5 +449,27 @@ static class Assert
         {
             throw new InvalidOperationException($"Did not expect to find '{unexpected}'.");
         }
+    }
+}
+
+internal sealed class FixedAgentContentDocumentResolver : IAgentContentDocumentResolver
+{
+    private readonly AgentContentDocument _document;
+
+    public FixedAgentContentDocumentResolver(AgentContentDocument document)
+    {
+        _document = document;
+    }
+
+    public List<string> Calls { get; } = new();
+
+    public Task<AgentContentDocument?> FindPublishedBySlugAsync(
+        PublicOutputRevalidationPlan plan,
+        string slug,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        Calls.Add(slug);
+        return Task.FromResult<AgentContentDocument?>(_document);
     }
 }

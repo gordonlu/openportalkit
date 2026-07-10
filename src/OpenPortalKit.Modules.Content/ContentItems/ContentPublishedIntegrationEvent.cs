@@ -10,7 +10,13 @@ public sealed record ContentPublishedIntegrationEvent(
     Guid SiteId,
     Guid ContentItemId,
     string Slug,
-    DateTimeOffset PublishedAt)
+    DateTimeOffset PublishedAt,
+    string Title,
+    string Summary,
+    string Body,
+    string? Source,
+    IReadOnlyList<string> Tags,
+    DateTimeOffset UpdatedAt)
     : IntegrationEvent(
         EventId,
         OccurredAt,

@@ -50,7 +50,8 @@ public sealed class PublishingRevalidationPlanner
             InvalidateRouteCache: true,
             WarmImportantPages: true,
             SnapshotRoutes: new[] { markdownSnapshot, jsonSnapshot },
-            RegenerateLlmsText: true);
+            RegenerateLlmsText: true,
+            SourcePayloadJson: message.PayloadJson);
     }
 
     private static PublicOutputRevalidationPlan CreateContentArchivedPlan(OutboxMessage message)
@@ -82,7 +83,8 @@ public sealed class PublishingRevalidationPlanner
             InvalidateRouteCache: true,
             WarmImportantPages: false,
             SnapshotRoutes: Array.Empty<string>(),
-            RegenerateLlmsText: true);
+            RegenerateLlmsText: true,
+            SourcePayloadJson: message.PayloadJson);
     }
 
     private static string ReadRequiredString(string payloadJson, string propertyName)

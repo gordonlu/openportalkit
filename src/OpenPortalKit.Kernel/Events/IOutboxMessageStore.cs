@@ -9,6 +9,12 @@ public interface IOutboxMessageStore
         int maxAttemptCount,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
+        int batchSize,
+        int maxAttemptCount,
+        DateTimeOffset leaseExpiresAt,
+        CancellationToken cancellationToken = default);
+
     Task<OutboxMessage?> FindByIdempotencyKeyAsync(
         string idempotencyKey,
         CancellationToken cancellationToken = default);

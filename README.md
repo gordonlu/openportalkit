@@ -8,8 +8,8 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 
 - .NET 10 solution and host skeletons
 - Kernel project with module, entity, event, audit, outbox, and job primitives
-- Kernel outbox processing contracts with in-memory store, idempotency tracking, retry policy, and package-free tests
-- Kernel audit recorder with in-memory query support by actor and target
+- Kernel outbox processing contracts with leases, idempotency tracking, retry policy, PostgreSQL adapters, and package-free tests
+- Kernel audit recorder with in-memory and PostgreSQL query support by actor and target
 - Generic content entities, slug generation, publish validation, version snapshots, audited publish events, and package-free content tests
 - Read-safe public content query contracts that hide draft, archived, future, and expired content
 - SEO baseline contracts for canonical URLs, Open Graph metadata, JSON-LD, sitemap XML, RSS, and robots.txt
@@ -20,6 +20,8 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - Search abstraction with in-memory provider, public/admin visibility rules, filters, repeatable reindexing, and outbox-driven indexing hook
 - Dashboard and analytics contracts with privacy-conscious event capture, AgentSEO readiness summaries, runtime health aggregation, dependency health probes, cached summaries, Prometheus text export, and .NET metrics publishing
 - Agent Access / AgentSEO contracts for Markdown snapshots, JSON snapshots, llms.txt, llms-full.txt, agent manifest, public OpenAPI, and AI bot policy
+- R8 PostgreSQL agent output artifact migration script in `db/postgresql/migrations/0008_agent_output_artifacts.sql`
+- R8 durable publishing delivery migration in `db/postgresql/migrations/0009_publishing_delivery.sql`, including JobHost processing, lease-based outbox claims, revalidation records, and audit history
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs

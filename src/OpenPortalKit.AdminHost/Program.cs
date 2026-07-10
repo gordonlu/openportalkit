@@ -1,6 +1,12 @@
+using System.Data.Common;
+using Npgsql;
 using OpenPortalKit.Kernel.Configuration;
+using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
+using OpenPortalKit.Kernel.Persistence;
+using OpenPortalKit.AdminHost.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess;
+using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
 using OpenPortalKit.Modules.Content;
@@ -17,10 +23,12 @@ using OpenPortalKit.Modules.Identity;
 using OpenPortalKit.Modules.Jobs;
 using OpenPortalKit.Modules.Search;
 using OpenPortalKit.Modules.Seo;
+using OpenPortalKit.Modules.Seo.Revalidation;
 using OpenPortalKit.Modules.Workflow;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
 
 // Add services to the container.
 builder.Services.AddRazorPages();
@@ -34,8 +42,21 @@ builder.Services.Configure<DashboardSummaryOptions>(
 builder.Services.AddSingleton<IContentItemStore, InMemoryContentItemStore>();
 builder.Services.AddSingleton<IDataSetStore, InMemoryDataSetStore>();
 builder.Services.AddSingleton<IDataRecordStore, InMemoryDataRecordStore>();
-builder.Services.AddSingleton<IOutboxMessageStore, InMemoryOutboxMessageStore>();
 builder.Services.AddSingleton<IAgentReadinessSignalProvider, ContentAgentReadinessSignalProvider>();
+builder.Services.Configure<AgentBotPolicyOptions>(
+    builder.Configuration.GetSection(AgentBotPolicyOptions.SectionName));
+builder.Services.Configure<AgentOutputGenerationOptions>(
+    builder.Configuration.GetSection(AgentOutputGenerationOptions.SectionName));
+var persistencePostgres = builder.Configuration
+    .GetSection(PostgresPersistenceOptions.SectionName)
+    .Get<PostgresPersistenceOptions>() ?? new PostgresPersistenceOptions();
+if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
+{
+    persistencePostgres.ConnectionString = builder.Configuration.GetConnectionString(
+        persistencePostgres.ConnectionStringName);
+}
+
+builder.Services.AddSingleton(persistencePostgres);
 var dashboardPostgres = builder.Configuration
     .GetSection(DashboardPostgresStorageOptions.SectionName)
     .Get<DashboardPostgresStorageOptions>() ?? new DashboardPostgresStorageOptions();
@@ -46,6 +67,20 @@ if (string.IsNullOrWhiteSpace(dashboardPostgres.ConnectionString))
 }
 
 builder.Services.AddSingleton(dashboardPostgres);
+var agentOutputPostgres = builder.Configuration
+    .GetSection(AgentOutputPostgresStorageOptions.SectionName)
+    .Get<AgentOutputPostgresStorageOptions>() ?? new AgentOutputPostgresStorageOptions();
+if (string.IsNullOrWhiteSpace(agentOutputPostgres.ConnectionString))
+{
+    agentOutputPostgres.ConnectionString = builder.Configuration.GetConnectionString(
+        agentOutputPostgres.ConnectionStringName);
+}
+
+builder.Services.AddSingleton(agentOutputPostgres);
+builder.Services.AddSingleton(
+    builder.Configuration
+        .GetSection(AgentOutputGenerationOptions.SectionName)
+        .Get<AgentOutputGenerationOptions>() ?? new AgentOutputGenerationOptions());
 if (dashboardPostgres.Enabled)
 {
     builder.Services.AddSingleton<IDashboardDbConnectionFactory, DashboardPostgresConnectionFactory>();
@@ -57,6 +92,53 @@ else
     builder.Services.AddSingleton<IAnalyticsEventStore, InMemoryAnalyticsEventStore>();
     builder.Services.AddSingleton<IDashboardSnapshotStore, InMemoryDashboardSnapshotStore>();
 }
+if (persistencePostgres.Enabled)
+{
+    builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
+    builder.Services.AddSingleton<IOutboxMessageStore, PostgresOutboxMessageStore>();
+    builder.Services.AddSingleton<IIdempotencyStore, PostgresIdempotencyStore>();
+    builder.Services.AddSingleton<IAuditLogStore, PostgresAuditLogStore>();
+    builder.Services.AddSingleton<IPublicOutputRevalidationStore, PostgresPublicOutputRevalidationStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IOutboxMessageStore, InMemoryOutboxMessageStore>();
+    builder.Services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
+    builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
+    builder.Services.AddSingleton<IPublicOutputRevalidationStore, InMemoryPublicOutputRevalidationStore>();
+}
+
+builder.Services.AddSingleton<AuditRecorder>();
+if (agentOutputPostgres.Enabled)
+{
+    builder.Services.AddSingleton<IAgentOutputDbConnectionFactory, AgentOutputPostgresConnectionFactory>();
+    builder.Services.AddSingleton<IAgentOutputArtifactStore, PostgresAgentOutputArtifactStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IAgentOutputArtifactStore, InMemoryAgentOutputArtifactStore>();
+}
+
+builder.Services.AddSingleton<PublishingEventAgentContentDocumentResolver>();
+builder.Services.AddSingleton<ContentStoreAgentContentDocumentResolver>();
+builder.Services.AddSingleton<IAgentContentDocumentResolver>(provider =>
+    new FallbackAgentContentDocumentResolver(new IAgentContentDocumentResolver[]
+    {
+        provider.GetRequiredService<PublishingEventAgentContentDocumentResolver>(),
+        provider.GetRequiredService<ContentStoreAgentContentDocumentResolver>()
+    }));
+builder.Services.AddSingleton<PublishingAgentOutputArtifactFactory>();
+builder.Services.AddSingleton<IPublicOutputRegenerator>(provider =>
+    new AgentOutputArtifactRegenerator(
+        provider.GetRequiredService<IAgentOutputArtifactStore>(),
+        provider.GetRequiredService<PublishingAgentOutputArtifactFactory>().CreateArtifactsAsync));
+builder.Services.AddSingleton<IPublicOutputRevalidationExecutor>(provider =>
+    new RecordingPublicOutputRevalidationExecutor(
+        provider.GetRequiredService<IPublicOutputRevalidationStore>(),
+        auditRecorder: provider.GetRequiredService<AuditRecorder>(),
+        regenerator: provider.GetRequiredService<IPublicOutputRegenerator>()));
+builder.Services.AddSingleton<PublishingRevalidationPlanner>();
+builder.Services.AddSingleton<IOutboxMessageHandler, PublishingRevalidationOutboxHandler>();
 builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
     new AnalyticsEventFactory(provider.GetRequiredService<IOptions<AnalyticsPrivacyOptions>>().Value));
 builder.Services.AddSingleton<IDashboardSignalSource, SiteOperationsDashboardSignalSource>();

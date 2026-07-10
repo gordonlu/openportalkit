@@ -6,18 +6,21 @@ public sealed class OutboxProcessor
     private readonly IIdempotencyStore _idempotencyStore;
     private readonly IReadOnlyDictionary<string, IOutboxMessageHandler> _handlers;
     private readonly RetryPolicy _retryPolicy;
+    private readonly Func<DateTimeOffset> _clock;
 
     public OutboxProcessor(
         IOutboxMessageStore messageStore,
         IIdempotencyStore idempotencyStore,
         IEnumerable<IOutboxMessageHandler> handlers,
-        RetryPolicy? retryPolicy = null)
+        RetryPolicy? retryPolicy = null,
+        Func<DateTimeOffset>? clock = null)
     {
         ArgumentNullException.ThrowIfNull(handlers);
 
         _messageStore = messageStore ?? throw new ArgumentNullException(nameof(messageStore));
         _idempotencyStore = idempotencyStore ?? throw new ArgumentNullException(nameof(idempotencyStore));
         _retryPolicy = retryPolicy ?? RetryPolicy.Default;
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _handlers = handlers.ToDictionary(handler => handler.EventName, StringComparer.Ordinal);
     }
 
@@ -31,16 +34,17 @@ public sealed class OutboxProcessor
         var failed = 0;
         var skipped = 0;
 
-        var messages = await _messageStore.GetPendingAsync(
+        var messages = await _messageStore.ClaimPendingAsync(
             batchSize,
             _retryPolicy.MaxAttemptCount,
+            _clock().Add(_retryPolicy.LeaseDuration),
             cancellationToken);
 
         foreach (var message in messages)
         {
             if (await _idempotencyStore.IsProcessedAsync(message.IdempotencyKey, cancellationToken))
             {
-                await _messageStore.MarkProcessedAsync(message.Id, DateTimeOffset.UtcNow, cancellationToken);
+                await _messageStore.MarkProcessedAsync(message.Id, _clock(), cancellationToken);
                 skipped++;
                 continue;
             }
@@ -50,7 +54,7 @@ public sealed class OutboxProcessor
                 await _messageStore.MarkFailedAsync(
                     message.Id,
                     $"No outbox handler is registered for event '{message.EventName}'.",
-                    DateTimeOffset.UtcNow,
+                    _clock(),
                     cancellationToken);
                 failed++;
                 continue;
@@ -59,7 +63,7 @@ public sealed class OutboxProcessor
             try
             {
                 await handler.HandleAsync(message, cancellationToken);
-                var processedAt = DateTimeOffset.UtcNow;
+                var processedAt = _clock();
                 await _idempotencyStore.MarkProcessedAsync(message.IdempotencyKey, processedAt, cancellationToken);
                 await _messageStore.MarkProcessedAsync(message.Id, processedAt, cancellationToken);
                 processed++;
@@ -71,7 +75,7 @@ public sealed class OutboxProcessor
                     string.IsNullOrWhiteSpace(exception.Message)
                         ? exception.GetType().Name
                         : exception.Message,
-                    DateTimeOffset.UtcNow,
+                    _clock(),
                     cancellationToken);
                 failed++;
             }

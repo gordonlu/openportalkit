@@ -73,7 +73,7 @@
                     @foreach (var output in Model.Outputs)
                     {
                         <a class="opk-agent-output" href="@output.Url">
-                            <span class="opk-chip is-approved">@output.Status</span>
+                            <span class="opk-chip @Model.StatusClass(output.Status)">@output.Status</span>
                             <strong>@output.Label</strong>
                             <small>@output.Url</small>
                             <p>@output.Description</p>
@@ -164,10 +164,18 @@
                                         <strong>@item.Title</strong>
                                         <span>@item.Path</span>
                                     </td>
-                                    <td><span class="opk-chip is-approved">@item.Markdown</span></td>
-                                    <td><span class="opk-chip is-approved">@item.Json</span></td>
-                                    <td><span class="opk-chip is-approved">@item.Llms</span></td>
+                                    <td><span class="opk-chip @Model.StatusClass(item.Markdown)">@item.Markdown</span></td>
+                                    <td><span class="opk-chip @Model.StatusClass(item.Json)">@item.Json</span></td>
+                                    <td><span class="opk-chip @Model.StatusClass(item.Llms)">@item.Llms</span></td>
                                     <td>@item.Policy</td>
+                                </tr>
+                            }
+                            @if (Model.SnapshotCoverage.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="5" class="opk-empty-cell">
+                                        No generated content snapshots have been recorded yet.
+                                    </td>
                                 </tr>
                             }
                         </tbody>

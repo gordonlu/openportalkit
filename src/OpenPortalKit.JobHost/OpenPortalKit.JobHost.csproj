@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.0" />
     <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Identity\OpenPortalKit.Modules.Identity.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />
@@ -21,5 +22,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
 </Project>

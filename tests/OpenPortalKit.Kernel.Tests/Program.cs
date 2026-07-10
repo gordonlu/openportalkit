@@ -5,8 +5,10 @@ using OpenPortalKit.Kernel.Publishing;
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("outbox stores only one message per idempotency key", OutboxStoresOneMessagePerIdempotencyKey),
+    ("outbox claims messages with an exclusive lease", OutboxClaimsMessagesWithExclusiveLease),
     ("outbox processor handles and marks messages processed", OutboxProcessorHandlesAndMarksMessagesProcessed),
     ("outbox processor retries failed messages", OutboxProcessorRetriesFailedMessages),
+    ("postgres migration defines durable publishing delivery", PostgresMigrationDefinesDurablePublishingDelivery),
     ("audit recorder can query by actor and target", AuditRecorderCanQueryByActorAndTarget)
 };
 
@@ -60,6 +62,21 @@ static async Task OutboxProcessorHandlesAndMarksMessagesProcessed()
     Assert.True(await idempotency.IsProcessedAsync("content-1"), "Expected idempotency key to be marked processed.");
 }
 
+static async Task OutboxClaimsMessagesWithExclusiveLease()
+{
+    var store = new InMemoryOutboxMessageStore();
+    await store.AddAsync(OutboxMessageFactory.FromIntegrationEvent(new TestIntegrationEvent("lease-1")));
+
+    var leaseUntil = DateTimeOffset.UtcNow.AddMinutes(1);
+    var firstClaim = await store.ClaimPendingAsync(10, 3, leaseUntil);
+    var secondClaim = await store.ClaimPendingAsync(10, 3, leaseUntil);
+    var stored = await store.FindByIdempotencyKeyAsync("lease-1");
+
+    Assert.Equal(1, firstClaim.Count);
+    Assert.Equal(0, secondClaim.Count);
+    Assert.Equal(leaseUntil, stored?.LeaseExpiresAt);
+}
+
 static async Task OutboxProcessorRetriesFailedMessages()
 {
     var store = new InMemoryOutboxMessageStore();
@@ -99,6 +116,24 @@ static async Task AuditRecorderCanQueryByActorAndTarget()
     Assert.Equal(1, byActor.Count);
     Assert.Equal(1, byTarget.Count);
     Assert.Equal("ContentPublished", byTarget[0].Action);
+}
+
+static Task PostgresMigrationDefinesDurablePublishingDelivery()
+{
+    var sql = File.ReadAllText(Path.Combine(
+        "db",
+        "postgresql",
+        "migrations",
+        "0009_publishing_delivery.sql"));
+
+    Assert.Contains("create table if not exists opk_outbox_messages", sql);
+    Assert.Contains("lease_expires_at timestamptz", sql);
+    Assert.Contains("create table if not exists opk_idempotency_keys", sql);
+    Assert.Contains("create table if not exists opk_public_output_revalidations", sql);
+    Assert.Contains("create table if not exists opk_audit_logs", sql);
+    Assert.Contains("ix_opk_outbox_messages_pending", sql);
+
+    return Task.CompletedTask;
 }
 
 internal sealed record TestIntegrationEvent(string Key)
@@ -164,6 +199,14 @@ internal static class Assert
         if (!condition)
         {
             throw new InvalidOperationException(message);
+        }
+    }
+
+    public static void Contains(string expected, string actual)
+    {
+        if (!actual.Contains(expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected to find '{expected}'.");
         }
     }
 }

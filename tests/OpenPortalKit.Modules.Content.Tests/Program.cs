@@ -1,6 +1,7 @@
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Modules.Content.ContentItems;
+using System.Text.Json;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -69,6 +70,10 @@ static async Task PublishCreatesVersionAuditLogAndOutboxMessage()
     Assert.Equal("ContentPublished", auditLogs[0].Action);
     Assert.Equal(1, pending.Count);
     Assert.Equal("ContentPublished", pending[0].EventName);
+    using var payload = JsonDocument.Parse(pending[0].PayloadJson);
+    Assert.Equal("Launch Notes", payload.RootElement.GetProperty("Title").GetString());
+    Assert.Equal("Body content.", payload.RootElement.GetProperty("Body").GetString());
+    Assert.Equal(publishedAt, payload.RootElement.GetProperty("PublishedAt").GetDateTimeOffset());
 }
 
 static async Task PublicQueryHidesDraftsArchivedAndExpiredContent()

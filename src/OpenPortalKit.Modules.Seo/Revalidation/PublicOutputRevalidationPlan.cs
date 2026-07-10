@@ -11,4 +11,5 @@ public sealed record PublicOutputRevalidationPlan(
     bool InvalidateRouteCache,
     bool WarmImportantPages,
     IReadOnlyList<string>? SnapshotRoutes = null,
-    bool RegenerateLlmsText = false);
+    bool RegenerateLlmsText = false,
+    string? SourcePayloadJson = null);

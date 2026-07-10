@@ -402,6 +402,13 @@ a:focus-visible {
   font-size: 0.78rem;
 }
 
+.opk-table td.opk-empty-cell {
+  padding: 24px 12px;
+  color: var(--opk-muted);
+  font-weight: 680;
+  text-align: center;
+}
+
 .opk-chip {
   display: inline-flex;
   align-items: center;
