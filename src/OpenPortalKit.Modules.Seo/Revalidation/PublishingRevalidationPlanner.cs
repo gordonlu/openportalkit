@@ -16,6 +16,7 @@ public sealed class PublishingRevalidationPlanner
             PublishingEventNames.ContentPublished => CreateContentPublishedPlan(message),
             PublishingEventNames.ContentUpdated => CreateContentPublishedPlan(message),
             PublishingEventNames.ContentArchived => CreateContentArchivedPlan(message),
+            PublishingEventNames.PortalPagePublished => CreatePortalPagePublishedPlan(message),
             _ => throw new InvalidOperationException(
                 $"Event '{message.EventName}' does not have a public output revalidation plan.")
         };
@@ -82,6 +83,33 @@ public sealed class PublishingRevalidationPlanner
             RegenerateSnapshots: false,
             InvalidateRouteCache: true,
             WarmImportantPages: false,
+            SnapshotRoutes: Array.Empty<string>(),
+            RegenerateLlmsText: true,
+            SourcePayloadJson: message.PayloadJson);
+    }
+
+    private static PublicOutputRevalidationPlan CreatePortalPagePublishedPlan(OutboxMessage message)
+    {
+        var slug = ReadRequiredString(message.PayloadJson, "Slug");
+        var path = "/pages/" + CanonicalUrlBuilder.NormalizePath(slug).Trim('/');
+
+        return new PublicOutputRevalidationPlan(
+            message.EventName,
+            message.IdempotencyKey,
+            message.OccurredAt,
+            new[]
+            {
+                path,
+                "/sitemap.xml",
+                "/rss.xml",
+                "/llms.txt",
+                "/llms-full.txt"
+            },
+            RegenerateSitemap: true,
+            RegenerateRss: true,
+            RegenerateSnapshots: false,
+            InvalidateRouteCache: true,
+            WarmImportantPages: true,
             SnapshotRoutes: Array.Empty<string>(),
             RegenerateLlmsText: true,
             SourcePayloadJson: message.PayloadJson);

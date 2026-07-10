@@ -107,6 +107,9 @@ static Task OpenApiDocumentDescribesPublicReadEndpoints()
     Assert.Equal("3.1.0", json.RootElement.GetProperty("openapi").GetString());
     Assert.True(paths.TryGetProperty("/api/public/content/{slug}.json", out _), "Expected JSON snapshot path.");
     Assert.True(paths.TryGetProperty("/content/{slug}.md", out _), "Expected Markdown snapshot path.");
+    Assert.True(paths.TryGetProperty("/pages/{slug}", out _), "Expected public page path.");
+    Assert.True(paths.TryGetProperty("/pages/{slug}.md", out _), "Expected public page Markdown path.");
+    Assert.True(paths.TryGetProperty("/api/public/pages/{slug}.json", out _), "Expected public page JSON path.");
     Assert.True(paths.TryGetProperty("/llms.txt", out _), "Expected llms.txt path.");
     Assert.True(paths.TryGetProperty("/.well-known/agent.json", out _), "Expected agent manifest path.");
 

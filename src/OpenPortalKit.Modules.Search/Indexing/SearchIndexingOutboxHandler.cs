@@ -14,7 +14,7 @@ public sealed class SearchIndexingOutboxHandler : IOutboxMessageHandler
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
     }
 
-    public string EventName => PublishingEventNames.ContentPublished;
+    public IReadOnlyCollection<string> EventNames { get; } = new[] { PublishingEventNames.ContentPublished };
 
     public async Task HandleAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {

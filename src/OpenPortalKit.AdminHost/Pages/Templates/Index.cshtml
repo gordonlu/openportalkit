@@ -1,0 +1,81 @@
+@page
+@model OpenPortalKit.AdminHost.Pages.Templates.IndexModel
+@{
+    ViewData["Title"] = "Block Templates";
+}
+
+<section class="opk-admin-shell">
+    <aside class="opk-sidebar" aria-label="Admin navigation">
+        <a class="opk-brand" asp-page="/Index"><span class="opk-brand-mark">OP</span><span><strong>OpenPortalKit</strong><small>Admin</small></span></a>
+        <nav class="opk-nav">
+            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
+            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
+            <a class="opk-nav-link is-active" asp-page="/Templates/Index"><span class="opk-nav-icon"></span>Templates</a>
+            <a class="opk-nav-link" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
+        </nav>
+        <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>Schema guard active</span></div>
+    </aside>
+
+    <div class="opk-workspace">
+        <header class="opk-topbar">
+            <div><h1>Block Templates</h1><p>Versioned, server-rendered building blocks for public portal pages.</p></div>
+        </header>
+
+        @if (!ViewContext.ModelState.IsValid)
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>
+        }
+
+        <section class="opk-template-workspace">
+            <div class="opk-panel opk-template-list">
+                <div class="opk-panel-header"><div><h2>Template Library</h2><p>Published templates can seed version-locked page instances.</p></div></div>
+                <div class="opk-table-wrap">
+                    <table class="opk-table">
+                        <thead><tr><th>Template</th><th>Status</th><th>Version</th><th>Blocks</th><th>Updated</th></tr></thead>
+                        <tbody>
+                        @foreach (var template in Model.Templates)
+                        {
+                            <tr><td><strong>@template.Name</strong><span>@template.Code</span></td><td><span class="opk-chip @(template.Status == OpenPortalKit.Modules.Content.BlockTemplates.PageTemplateStatus.Published ? "is-approved" : "is-draft")">@template.Status</span></td><td>@template.Version</td><td>@template.Blocks.Count</td><td>@template.UpdatedAt.ToString("yyyy-MM-dd HH:mm")</td></tr>
+                        }
+                        @if (Model.Templates.Count == 0)
+                        {
+                            <tr><td colspan="5" class="opk-empty-cell">No templates yet. Create a schema-guarded template to start a page.</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <aside class="opk-template-side">
+                <form method="post" asp-page-handler="CreateTemplate" class="opk-panel opk-template-form">
+                    <div class="opk-panel-header"><div><h2>Create Template</h2><p>Starts with a Hero and Rich Text block.</p></div></div>
+                    <label>Code<input asp-for="Template.Code" placeholder="corporate-homepage" /></label>
+                    <label>Name<input asp-for="Template.Name" placeholder="Corporate homepage" /></label>
+                    <label>Description<textarea asp-for="Template.Description" rows="3"></textarea></label>
+                    <label class="opk-check-label"><input asp-for="Template.Publish" />Publish template</label>
+                    <button class="opk-button opk-button-primary" type="submit">Create template</button>
+                </form>
+
+                <form method="post" asp-page-handler="CreatePage" class="opk-panel opk-template-form">
+                    <div class="opk-panel-header"><div><h2>Create Page</h2><p>Fixes the selected template version and block snapshot.</p></div></div>
+                    <label>Template<select asp-for="NewPage.TemplateCode"><option value="">Select template</option>@foreach (var template in Model.Templates.Where(template => template.Status == OpenPortalKit.Modules.Content.BlockTemplates.PageTemplateStatus.Published)){<option value="@template.Code">@template.Name (v@template.Version)</option>}</select></label>
+                    <label>Title<input asp-for="NewPage.Title" /></label>
+                    <label>Slug<input asp-for="NewPage.Slug" placeholder="public-page" /></label>
+                    <label>Summary<textarea asp-for="NewPage.Summary" rows="3"></textarea></label>
+                    <label class="opk-check-label"><input asp-for="NewPage.PublishImmediately" />Publish now</label>
+                    <button class="opk-button opk-button-secondary" type="submit">Create page</button>
+                </form>
+            </aside>
+        </section>
+
+        <section class="opk-panel opk-template-blocks">
+            <div class="opk-panel-header"><div><h2>Predefined Blocks</h2><p>Each block has a fixed schema version and typed configuration fields.</p></div></div>
+            <div class="opk-agent-output-grid">
+            @foreach (var block in Model.Blocks)
+            {
+                <div class="opk-agent-output"><span class="opk-chip is-approved">@block.SchemaVersion</span><strong>@block.DisplayName</strong><small>@block.Code</small><p>@block.Description</p></div>
+            }
+            </div>
+        </section>
+    </div>
+</section>

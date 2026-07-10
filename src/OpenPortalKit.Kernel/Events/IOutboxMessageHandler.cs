@@ -2,7 +2,7 @@ namespace OpenPortalKit.Kernel.Events;
 
 public interface IOutboxMessageHandler
 {
-    string EventName { get; }
+    IReadOnlyCollection<string> EventNames { get; }
 
     Task HandleAsync(OutboxMessage message, CancellationToken cancellationToken = default);
 }

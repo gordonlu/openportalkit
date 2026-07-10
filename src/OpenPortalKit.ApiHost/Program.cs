@@ -1,13 +1,16 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using System.Data.Common;
+using System.Text.Encodings.Web;
 using Npgsql;
 using OpenPortalKit.Kernel.Configuration;
+using OpenPortalKit.Kernel.Persistence;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
 using OpenPortalKit.Modules.Content;
+using OpenPortalKit.Modules.Content.BlockTemplates;
 using OpenPortalKit.Modules.Content.ContentItems;
 using OpenPortalKit.Modules.Dashboard;
 using OpenPortalKit.Modules.Dashboard.Analytics;
@@ -34,6 +37,16 @@ builder.Services.Configure<AnalyticsPrivacyOptions>(
     builder.Configuration.GetSection(AnalyticsPrivacyOptions.SectionName));
 builder.Services.Configure<AgentBotPolicyOptions>(
     builder.Configuration.GetSection(AgentBotPolicyOptions.SectionName));
+var persistencePostgres = builder.Configuration
+    .GetSection(PostgresPersistenceOptions.SectionName)
+    .Get<PostgresPersistenceOptions>() ?? new PostgresPersistenceOptions();
+if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
+{
+    persistencePostgres.ConnectionString = builder.Configuration.GetConnectionString(
+        persistencePostgres.ConnectionStringName);
+}
+
+builder.Services.AddSingleton(persistencePostgres);
 var dashboardPostgres = builder.Configuration
     .GetSection(DashboardPostgresStorageOptions.SectionName)
     .Get<DashboardPostgresStorageOptions>() ?? new DashboardPostgresStorageOptions();
@@ -78,6 +91,17 @@ builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
 builder.Services.AddSingleton<ApiAnalyticsCaptureQueue>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ApiAnalyticsCaptureQueue>());
 builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore());
+if (persistencePostgres.Enabled)
+{
+    builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
+    builder.Services.AddSingleton<IPageStore, PostgresPageStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IPageStore>(_ => BuildSeedPageStore());
+}
+
+builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
 
 var app = builder.Build();
 
@@ -232,10 +256,10 @@ app.MapGet("/robots.txt", (HttpRequest request, IOptions<AgentBotPolicyOptions> 
     return Results.Text(RobotsTxtGenerator.Generate(policy), "text/plain");
 });
 
-app.MapGet("/sitemap.xml", async (HttpRequest request, IContentItemStore contentStore) =>
+app.MapGet("/sitemap.xml", async (HttpRequest request, IContentItemStore contentStore, IPageStore pageStore) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
-    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore);
+    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore, pageStore);
     var entries = resources
         .Select(resource => new SitemapEntry(
             CanonicalUrlBuilder.Build(siteBaseUrl, resource.Path),
@@ -246,10 +270,10 @@ app.MapGet("/sitemap.xml", async (HttpRequest request, IContentItemStore content
     return Results.Text(SitemapXmlGenerator.Generate(entries), "application/xml");
 });
 
-app.MapGet("/rss.xml", async (HttpRequest request, IContentItemStore contentStore) =>
+app.MapGet("/rss.xml", async (HttpRequest request, IContentItemStore contentStore, IPageStore pageStore) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
-    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore);
+    var resources = await GetPublicResourceDescriptorsAsync(siteBaseUrl, contentStore, pageStore);
     var feed = new RssFeed(
         "OpenPortalKit Public Feed",
         "Latest public OpenPortalKit content.",
@@ -266,18 +290,18 @@ app.MapGet("/rss.xml", async (HttpRequest request, IContentItemStore contentStor
     return Results.Text(RssXmlGenerator.Generate(feed), "application/rss+xml");
 });
 
-app.MapGet("/llms.txt", async (HttpRequest request, IContentItemStore contentStore) =>
+app.MapGet("/llms.txt", async (HttpRequest request, IContentItemStore contentStore, IPageStore pageStore, ServerRenderedBlockPageRenderer renderer) =>
 {
     var profile = BuildAgentSiteProfile(request);
-    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore);
+    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore, pageStore, renderer);
 
     return Results.Text(LlmsTextGenerator.Generate(profile, documents, includeFullContent: false), "text/plain; charset=utf-8");
 });
 
-app.MapGet("/llms-full.txt", async (HttpRequest request, IContentItemStore contentStore) =>
+app.MapGet("/llms-full.txt", async (HttpRequest request, IContentItemStore contentStore, IPageStore pageStore, ServerRenderedBlockPageRenderer renderer) =>
 {
     var profile = BuildAgentSiteProfile(request);
-    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore);
+    var documents = await GetAgentContentDocumentsAsync(profile.BaseUrl, contentStore, pageStore, renderer);
 
     return Results.Text(LlmsTextGenerator.Generate(profile, documents, includeFullContent: true), "text/plain; charset=utf-8");
 });
@@ -341,6 +365,52 @@ app.MapGet("/api/public/content/{slug}.json", async (string slug, HttpRequest re
     return document is null
         ? Results.NotFound()
         : Results.Text(AgentSnapshotGenerator.GenerateJson(document), "application/json; charset=utf-8");
+});
+
+app.MapGet("/pages/{slug}", async (
+    string slug,
+    HttpRequest request,
+    IPageStore pageStore,
+    ServerRenderedBlockPageRenderer renderer) =>
+{
+    var page = await new PublicPageQueryService(pageStore)
+        .FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
+    if (page is null)
+    {
+        return Results.NotFound();
+    }
+
+    var canonicalUrl = CanonicalUrlBuilder.Build(GetSiteBaseUrl(request), "/pages/" + page.Slug);
+    var html = BuildPublicPageHtml(page, canonicalUrl, renderer.RenderBody(page));
+    return Results.Content(html, "text/html; charset=utf-8");
+});
+
+app.MapGet("/pages/{slug}.md", async (
+    string slug,
+    HttpRequest request,
+    IPageStore pageStore,
+    ServerRenderedBlockPageRenderer renderer) =>
+{
+    var page = await new PublicPageQueryService(pageStore)
+        .FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
+    return page is null
+        ? Results.NotFound()
+        : Results.Text(AgentSnapshotGenerator.GenerateMarkdown(
+            BuildAgentPageDocument(page, GetSiteBaseUrl(request), renderer)), "text/markdown; charset=utf-8");
+});
+
+app.MapGet("/api/public/pages/{slug}.json", async (
+    string slug,
+    HttpRequest request,
+    IPageStore pageStore,
+    ServerRenderedBlockPageRenderer renderer) =>
+{
+    var page = await new PublicPageQueryService(pageStore)
+        .FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
+    return page is null
+        ? Results.NotFound()
+        : Results.Text(AgentSnapshotGenerator.GenerateJson(
+            BuildAgentPageDocument(page, GetSiteBaseUrl(request), renderer)), "application/json; charset=utf-8");
 });
 
 app.MapGet("/api/public/content/sample/metadata", (HttpRequest request) =>
@@ -450,6 +520,7 @@ static bool IsPublicOutputRequest(HttpRequest request)
 
     return request.Path.StartsWithSegments("/api/public", StringComparison.OrdinalIgnoreCase) ||
         request.Path.StartsWithSegments("/content", StringComparison.OrdinalIgnoreCase) ||
+        request.Path.StartsWithSegments("/pages", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/robots.txt", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/sitemap.xml", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/rss.xml", StringComparison.OrdinalIgnoreCase) ||
@@ -679,6 +750,44 @@ static IContentItemStore BuildSeedContentItemStore()
     return store;
 }
 
+static IPageStore BuildSeedPageStore()
+{
+    var store = new InMemoryPageStore();
+    var now = new DateTimeOffset(2026, 7, 8, 10, 0, 0, TimeSpan.Zero);
+    var page = new PortalPage(
+        Guid.Parse("a1000000-0000-0000-0000-000000000001"),
+        GetDefaultSiteId(),
+        Guid.Parse("a1000000-0000-0000-0000-000000000002"),
+        1,
+        "OpenPortalKit Public Pages",
+        "public-pages",
+        "A server-rendered page assembled from predefined, versioned blocks.",
+        PortalPageStatus.Published,
+        new[]
+        {
+            new BlockInstance(
+                Guid.Parse("a1000000-0000-0000-0000-000000000003"),
+                "hero",
+                "block.hero.v1",
+                0,
+                """{"headline":"Public pages, without a page builder","summary":"OpenPortalKit renders versioned templates on the server with constrained block configuration.","actionUrl":"/api/public","actionLabel":"Explore public APIs"}"""),
+            new BlockInstance(
+                Guid.Parse("a1000000-0000-0000-0000-000000000004"),
+                "rich-text",
+                "block.rich-text.v1",
+                1,
+                """{"body":"Templates use predefined blocks with explicit schemas.\nEach page fixes the template version used to create it, preserving traceability for editorial and public output changes."}""")
+        },
+        Guid.Parse("a1000000-0000-0000-0000-000000000005"),
+        Guid.Parse("a1000000-0000-0000-0000-000000000005"),
+        now,
+        now,
+        now);
+
+    store.UpsertAsync(page).GetAwaiter().GetResult();
+    return store;
+}
+
 static IReadOnlyList<ContentItem> GetSeedContentItems()
 {
     var siteId = GetDefaultSiteId();
@@ -733,10 +842,12 @@ static IReadOnlyList<PublicResourceDescriptor> GetSeedPublicResourceDescriptors(
 
 static async Task<IReadOnlyList<PublicResourceDescriptor>> GetPublicResourceDescriptorsAsync(
     Uri siteBaseUrl,
-    IContentItemStore contentStore)
+    IContentItemStore contentStore,
+    IPageStore pageStore)
 {
     var query = new PublicContentQueryService(contentStore);
     var items = await query.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
+    var pages = await new PublicPageQueryService(pageStore).ListPublishedAsync(GetDefaultSiteId());
 
     return items
         .Select(item => new PublicResourceDescriptor(
@@ -746,12 +857,41 @@ static async Task<IReadOnlyList<PublicResourceDescriptor>> GetPublicResourceDesc
             item.PublishedAt,
             item.UpdatedAt,
             "en-US"))
+        .Concat(pages.Select(page => new PublicResourceDescriptor(
+            page.Title,
+            page.Summary,
+            CanonicalUrlBuilder.NormalizePath("/pages/" + page.Slug),
+            page.PublishedAt!.Value,
+            page.UpdatedAt,
+            "en-US")))
         .ToArray();
+}
+
+static string BuildPublicPageHtml(PortalPage page, Uri canonicalUrl, string body)
+{
+    var encoder = HtmlEncoder.Default;
+    return $"""
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>{encoder.Encode(page.Title)}</title>
+            <meta name="description" content="{encoder.Encode(page.Summary)}">
+            <link rel="canonical" href="{encoder.Encode(canonicalUrl.ToString())}">
+        </head>
+        <body>
+            <main>{body}</main>
+        </body>
+        </html>
+        """;
 }
 
 static async Task<IReadOnlyList<AgentContentDocument>> GetAgentContentDocumentsAsync(
     Uri siteBaseUrl,
-    IContentItemStore contentStore)
+    IContentItemStore contentStore,
+    IPageStore? pageStore = null,
+    ServerRenderedBlockPageRenderer? pageRenderer = null)
 {
     var query = new PublicContentQueryService(contentStore);
     var summaries = await query.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
@@ -766,7 +906,45 @@ static async Task<IReadOnlyList<AgentContentDocument>> GetAgentContentDocumentsA
         }
     }
 
+    if (pageStore is not null && pageRenderer is not null)
+    {
+        var pages = await new PublicPageQueryService(pageStore).ListPublishedAsync(GetDefaultSiteId());
+        documents.AddRange(pages.Select(page => BuildAgentPageDocument(page, siteBaseUrl, pageRenderer)));
+    }
+
     return documents;
+}
+
+static AgentContentDocument BuildAgentPageDocument(
+    PortalPage page,
+    Uri siteBaseUrl,
+    ServerRenderedBlockPageRenderer renderer)
+{
+    var text = System.Text.RegularExpressions.Regex.Replace(renderer.RenderBody(page), "<[^>]+>", " ");
+    text = System.Net.WebUtility.HtmlDecode(text).Trim();
+
+    return new AgentContentDocument(
+        "page:" + page.Id.ToString("D"),
+        "Page",
+        page.Title,
+        page.Slug,
+        page.Summary,
+        text,
+        CanonicalUrlBuilder.Build(siteBaseUrl, "/pages/" + page.Slug),
+        page.PublishedAt!.Value,
+        page.UpdatedAt,
+        "OpenPortalKit Editorial",
+        "Block Template System",
+        new[] { "page", "block-template", "server-rendered" },
+        new[]
+        {
+            "The page is rendered from a fixed, versioned template snapshot.",
+            "Block configuration is schema-validated and server-rendered."
+        },
+        new[] { new AgentLink("Public API discovery", new Uri(siteBaseUrl, "/api/public")) },
+        new[] { new AgentLink("Sitemap", new Uri(siteBaseUrl, "/sitemap.xml")) },
+        AgentVisibilityPolicy.Default,
+        "Cite the canonical URL and preserve source attribution.");
 }
 
 static async Task<AgentContentDocument?> FindAgentContentDocumentAsync(

@@ -10,6 +10,7 @@ using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
 using OpenPortalKit.Modules.Audit;
 using OpenPortalKit.Modules.Content;
+using OpenPortalKit.Modules.Content.BlockTemplates;
 using OpenPortalKit.Modules.Content.ContentItems;
 using OpenPortalKit.Modules.Dashboard;
 using OpenPortalKit.Modules.Dashboard.Analytics;
@@ -109,6 +110,27 @@ else
 }
 
 builder.Services.AddSingleton<AuditRecorder>();
+builder.Services.AddSingleton<IBlockDefinitionCatalog, PredefinedBlockCatalog>();
+if (persistencePostgres.Enabled)
+{
+    builder.Services.AddSingleton<IPageTemplateStore, PostgresPageTemplateStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IPageTemplateStore, InMemoryPageTemplateStore>();
+}
+
+builder.Services.AddSingleton<PageTemplateService>();
+if (persistencePostgres.Enabled)
+{
+    builder.Services.AddSingleton<IPageStore, PostgresPageStore>();
+}
+else
+{
+    builder.Services.AddSingleton<IPageStore, InMemoryPageStore>();
+}
+
+builder.Services.AddSingleton<PortalPageService>();
 if (agentOutputPostgres.Enabled)
 {
     builder.Services.AddSingleton<IAgentOutputDbConnectionFactory, AgentOutputPostgresConnectionFactory>();

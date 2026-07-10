@@ -320,6 +320,69 @@ a:focus-visible {
   grid-row: auto;
 }
 
+.opk-template-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.opk-template-side {
+  display: grid;
+  gap: 18px;
+}
+
+.opk-template-form {
+  display: grid;
+  gap: 12px;
+}
+
+.opk-template-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--opk-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.opk-template-form input:not([type="checkbox"]),
+.opk-template-form textarea,
+.opk-template-form select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--opk-border);
+  border-radius: 7px;
+  background: var(--opk-surface);
+  color: var(--opk-text);
+  font: inherit;
+}
+
+.opk-template-form textarea {
+  resize: vertical;
+}
+
+.opk-template-form .opk-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.opk-template-form .opk-check-label input {
+  width: 16px;
+  height: 16px;
+}
+
+.opk-template-blocks {
+  margin-top: 18px;
+}
+
+@media (max-width: 980px) {
+  .opk-template-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
 .opk-panel-header {
   display: flex;
   align-items: flex-start;

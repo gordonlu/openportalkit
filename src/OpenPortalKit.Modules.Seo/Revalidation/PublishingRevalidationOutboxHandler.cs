@@ -16,7 +16,13 @@ public sealed class PublishingRevalidationOutboxHandler : IOutboxMessageHandler
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
     }
 
-    public string EventName => PublishingEventNames.ContentPublished;
+    public IReadOnlyCollection<string> EventNames { get; } = new[]
+    {
+        PublishingEventNames.ContentPublished,
+        PublishingEventNames.ContentUpdated,
+        PublishingEventNames.ContentArchived,
+        PublishingEventNames.PortalPagePublished
+    };
 
     public async Task HandleAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {

@@ -15,6 +15,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("redirect resolver normalizes legacy paths and status codes", RedirectResolverNormalizesLegacyPathsAndStatusCodes),
     ("redirect resolver ignores disabled and loop rules", RedirectResolverIgnoresDisabledAndLoopRules),
     ("publishing revalidation planner includes public routes and outputs", PublishingRevalidationPlannerIncludesPublicRoutesAndOutputs),
+    ("portal page publishing plans public page revalidation", PortalPagePublishingPlansPublicPageRevalidation),
     ("publishing revalidation handler records idempotent result", PublishingRevalidationHandlerRecordsIdempotentResult)
 };
 
@@ -222,6 +223,23 @@ static Task PublishingRevalidationPlannerIncludesPublicRoutesAndOutputs()
     Assert.Contains("/api/public/content/launch-notes.json", plan.SnapshotRoutes ?? Array.Empty<string>());
     Assert.True(plan.InvalidateRouteCache, "Expected route cache invalidation.");
     Assert.True(plan.WarmImportantPages, "Expected important public pages to be warmed.");
+
+    return Task.CompletedTask;
+}
+
+static Task PortalPagePublishingPlansPublicPageRevalidation()
+{
+    var planner = new PublishingRevalidationPlanner();
+    var message = CreateOutboxMessage(PublishingEventNames.PortalPagePublished, "public-pages");
+
+    var plan = planner.CreatePlan(message);
+
+    Assert.Equal(PublishingEventNames.PortalPagePublished, plan.SourceEventName);
+    Assert.Contains("/pages/public-pages", plan.Routes);
+    Assert.Contains("/sitemap.xml", plan.Routes);
+    Assert.Contains("/rss.xml", plan.Routes);
+    Assert.False(plan.RegenerateSnapshots, "Portal page snapshots are not materialized by the content artifact worker.");
+    Assert.True(plan.RegenerateLlmsText, "Expected llms text regeneration.");
 
     return Task.CompletedTask;
 }

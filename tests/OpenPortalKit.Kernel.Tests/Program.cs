@@ -7,6 +7,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("outbox stores only one message per idempotency key", OutboxStoresOneMessagePerIdempotencyKey),
     ("outbox claims messages with an exclusive lease", OutboxClaimsMessagesWithExclusiveLease),
     ("outbox processor handles and marks messages processed", OutboxProcessorHandlesAndMarksMessagesProcessed),
+    ("outbox processor dispatches multi-event handlers", OutboxProcessorDispatchesMultiEventHandlers),
     ("outbox processor retries failed messages", OutboxProcessorRetriesFailedMessages),
     ("postgres migration defines durable publishing delivery", PostgresMigrationDefinesDurablePublishingDelivery),
     ("audit recorder can query by actor and target", AuditRecorderCanQueryByActorAndTarget)
@@ -97,6 +98,31 @@ static async Task OutboxProcessorRetriesFailedMessages()
     Assert.True(afterSecondRun?.ProcessedAt is not null, "Expected retried message to be marked processed.");
 }
 
+static async Task OutboxProcessorDispatchesMultiEventHandlers()
+{
+    var store = new InMemoryOutboxMessageStore();
+    var idempotency = new InMemoryIdempotencyStore();
+    var handler = new CountingOutboxHandler(
+        PublishingEventNames.ContentPublished,
+        PublishingEventNames.PortalPagePublished);
+    var processor = new OutboxProcessor(store, idempotency, new[] { handler });
+    var message = new OutboxMessage(
+        Guid.NewGuid(),
+        PublishingEventNames.PortalPagePublished,
+        "{}",
+        "portal-page:multi-event",
+        DateTimeOffset.UtcNow,
+        null,
+        0,
+        null);
+
+    await store.AddAsync(message);
+    var result = await processor.ProcessPendingAsync();
+
+    Assert.Equal(1, result.ProcessedCount);
+    Assert.Equal(1, handler.CallCount);
+}
+
 static async Task AuditRecorderCanQueryByActorAndTarget()
 {
     var store = new InMemoryAuditLogStore();
@@ -145,12 +171,12 @@ internal sealed record TestIntegrationEvent(string Key)
 
 internal sealed class CountingOutboxHandler : IOutboxMessageHandler
 {
-    public CountingOutboxHandler(string eventName)
+    public CountingOutboxHandler(params string[] eventNames)
     {
-        EventName = eventName;
+        EventNames = eventNames;
     }
 
-    public string EventName { get; }
+    public IReadOnlyCollection<string> EventNames { get; }
 
     public int CallCount { get; private set; }
 
@@ -167,10 +193,10 @@ internal sealed class FailsOnceOutboxHandler : IOutboxMessageHandler
 
     public FailsOnceOutboxHandler(string eventName)
     {
-        EventName = eventName;
+        EventNames = new[] { eventName };
     }
 
-    public string EventName { get; }
+    public IReadOnlyCollection<string> EventNames { get; }
 
     public Task HandleAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {

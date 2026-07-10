@@ -21,7 +21,9 @@ public sealed class OutboxProcessor
         _idempotencyStore = idempotencyStore ?? throw new ArgumentNullException(nameof(idempotencyStore));
         _retryPolicy = retryPolicy ?? RetryPolicy.Default;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
-        _handlers = handlers.ToDictionary(handler => handler.EventName, StringComparer.Ordinal);
+        _handlers = handlers
+            .SelectMany(handler => handler.EventNames.Select(eventName => new { eventName, handler }))
+            .ToDictionary(item => item.eventName, item => item.handler, StringComparer.Ordinal);
     }
 
     public async Task<OutboxProcessingResult> ProcessPendingAsync(
