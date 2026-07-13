@@ -4,9 +4,11 @@ using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
+using OpenPortalKit.Infrastructure.Production;
 using OpenPortalKit.AdminHost;
 using OpenPortalKit.AdminHost.AgentAccess;
 using OpenPortalKit.AdminHost.IndustryPacks;
+using OpenPortalKit.AdminHost.Security;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
@@ -23,6 +25,7 @@ using OpenPortalKit.Modules.Dashboard.Summaries;
 using OpenPortalKit.Modules.Data;
 using OpenPortalKit.Modules.Data.Datasets;
 using OpenPortalKit.Modules.Identity;
+using OpenPortalKit.Modules.Identity.Authentication;
 using OpenPortalKit.Modules.IndustryPacks;
 using OpenPortalKit.Modules.Jobs;
 using OpenPortalKit.Modules.Search;
@@ -30,9 +33,32 @@ using OpenPortalKit.Modules.Seo;
 using OpenPortalKit.Modules.Seo.Revalidation;
 using OpenPortalKit.Modules.Workflow;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
+
+var adminAuthentication = builder.Configuration
+    .GetSection(AdminAuthenticationOptions.SectionName)
+    .Get<AdminAuthenticationOptions>() ?? new AdminAuthenticationOptions();
+if (adminAuthentication.RequireAuthentication && adminAuthentication.Mode == AdminAuthenticationMode.Local &&
+    !adminAuthentication.PasswordHash.StartsWith("pbkdf2-sha512$", StringComparison.Ordinal))
+{
+    throw new InvalidOperationException(
+        "Admin authentication requires OpenPortalKit:AdminAuthentication:PasswordHash in PBKDF2-SHA512 format.");
+}
+if (adminAuthentication.RequireAuthentication && adminAuthentication.Mode == AdminAuthenticationMode.OpenIdConnect &&
+    (!Uri.TryCreate(adminAuthentication.Authority, UriKind.Absolute, out var authority) || authority.Scheme != Uri.UriSchemeHttps ||
+     string.IsNullOrWhiteSpace(adminAuthentication.ClientId) || string.IsNullOrWhiteSpace(adminAuthentication.ClientSecret)))
+{
+    throw new InvalidOperationException(
+        "OpenID Connect admin authentication requires an HTTPS Authority, ClientId, and ClientSecret.");
+}
 
 var industryPackRoot = Path.GetFullPath(Path.Combine(
     builder.Environment.ContentRootPath,
@@ -48,8 +74,130 @@ if (!industryPackCatalogResult.Succeeded)
 
 // Add services to the container.
 builder.Services.AddRazorPages();
+builder.Services.AddSingleton(adminAuthentication);
+var dataProtection = builder.Services.AddDataProtection()
+    .SetApplicationName("OpenPortalKit.AdminHost");
+if (!string.IsNullOrWhiteSpace(adminAuthentication.DataProtectionKeyPath))
+{
+    if (string.IsNullOrWhiteSpace(adminAuthentication.KeyEncryptionCertificatePath))
+    {
+        throw new InvalidOperationException(
+            "A custom Data Protection key path requires an X.509 key-encryption certificate.");
+    }
+    var keyDirectory = Directory.CreateDirectory(Path.GetFullPath(adminAuthentication.DataProtectionKeyPath));
+    var certificate = X509CertificateLoader.LoadPkcs12FromFile(
+        adminAuthentication.KeyEncryptionCertificatePath,
+        adminAuthentication.KeyEncryptionCertificatePassword);
+    dataProtection.PersistKeysToFileSystem(keyDirectory).ProtectKeysWithCertificate(certificate);
+}
+builder.Services.AddSingleton<PasswordCredentialHasher>();
+builder.Services.AddSingleton<AdminCredentialValidator>();
+builder.Services.AddSingleton<AdminLoginAttemptGuard>();
+var authenticationBuilder = builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
+    {
+        options.Cookie.Name = "__Host-OpenPortalKit.Admin";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.LoginPath = "/Account/Login";
+        options.AccessDeniedPath = "/Account/Login";
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(Math.Max(5, adminAuthentication.IdleTimeoutMinutes));
+        options.SlidingExpiration = true;
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            var startedValue = context.Principal?.FindFirst("opk:session_started")?.Value;
+            var sessionVersion = context.Principal?.FindFirst("opk:session_version")?.Value;
+            if (!long.TryParse(startedValue, out var startedSeconds) ||
+                !string.Equals(sessionVersion, adminAuthentication.SessionVersion, StringComparison.Ordinal) ||
+                DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(startedSeconds) >
+                TimeSpan.FromHours(Math.Max(1, adminAuthentication.AbsoluteTimeoutHours)))
+            {
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
+    });
+if (adminAuthentication.Mode == AdminAuthenticationMode.OpenIdConnect)
+{
+    authenticationBuilder.AddOpenIdConnect("OpenIdConnect", options =>
+    {
+        options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.Authority = adminAuthentication.Authority;
+        options.ClientId = adminAuthentication.ClientId;
+        options.ClientSecret = adminAuthentication.ClientSecret;
+        options.CallbackPath = adminAuthentication.CallbackPath;
+        options.ResponseType = "code";
+        options.UsePkce = true;
+        options.SaveTokens = false;
+        options.GetClaimsFromUserInfoEndpoint = true;
+        options.Scope.Clear();
+        options.Scope.Add("openid");
+        options.Scope.Add("profile");
+        options.Scope.Add("email");
+        options.Events.OnTokenValidated = async context =>
+        {
+            var identity = context.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
+            var hasRequiredRole = context.Principal?.Claims.Any(claim =>
+                (claim.Type == "roles" || claim.Type == System.Security.Claims.ClaimTypes.Role) &&
+                string.Equals(claim.Value, adminAuthentication.RequiredRole, StringComparison.Ordinal)) == true;
+            if (identity is null || !hasRequiredRole)
+            {
+                context.Fail("The identity is not assigned the required OpenPortalKit administrator role.");
+                await context.HttpContext.RequestServices.GetRequiredService<AuditRecorder>().RecordAsync(
+                    new AuditRecordRequest(null, "admin.oidc.denied", "AdminAccount",
+                        context.Principal?.Identity?.Name ?? "unknown",
+                        MetadataJson: System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            TraceId = context.HttpContext.TraceIdentifier,
+                            Reason = "required_role_missing"
+                        })), context.HttpContext.RequestAborted);
+                return;
+            }
+            identity.AddClaim(new System.Security.Claims.Claim(
+                System.Security.Claims.ClaimTypes.Role, "Administrator"));
+            identity.AddClaim(new System.Security.Claims.Claim(
+                "opk:session_started", DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            identity.AddClaim(new System.Security.Claims.Claim("opk:session_version", adminAuthentication.SessionVersion));
+            await context.HttpContext.RequestServices.GetRequiredService<AuditRecorder>().RecordAsync(
+                new AuditRecordRequest(null, "admin.oidc.succeeded", "AdminAccount",
+                    context.Principal?.Identity?.Name ?? "unknown",
+                    MetadataJson: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        TraceId = context.HttpContext.TraceIdentifier,
+                        Authority = adminAuthentication.Authority
+                    })), context.HttpContext.RequestAborted);
+        };
+        options.Events.OnRemoteFailure = async context =>
+        {
+            context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("OpenPortalKit.AdminAuthentication")
+                .LogWarning("OpenID Connect authentication failed. TraceId: {TraceId}; Error: {Error}",
+                    context.HttpContext.TraceIdentifier,
+                    context.Failure?.GetType().Name ?? "RemoteFailure");
+            await context.HttpContext.RequestServices.GetRequiredService<AuditRecorder>().RecordAsync(
+                new AuditRecordRequest(null, "admin.oidc.failed", "AdminAccount", "unknown",
+                    MetadataJson: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        TraceId = context.HttpContext.TraceIdentifier,
+                        ErrorType = context.Failure?.GetType().Name ?? "RemoteFailure"
+                    })), context.HttpContext.RequestAborted);
+        };
+    });
+}
+builder.Services.AddAuthorization(options =>
+{
+    if (adminAuthentication.RequireAuthentication)
+    {
+        options.FallbackPolicy = new AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .RequireRole("Administrator")
+            .Build();
+    }
+});
 builder.Services.AddSingleton(industryPackCatalogResult);
-builder.Services.AddHealthChecks();
+builder.Services.AddOpenPortalKitProductionHardening(builder.Configuration, adminHost: true);
 builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
 builder.Services.Configure<AnalyticsPrivacyOptions>(
@@ -225,18 +373,17 @@ var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
 }
 
-app.UseHttpsRedirection();
-
 app.UseRouting();
+app.UseOpenPortalKitProductionHardening();
 
+app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 
-app.MapStaticAssets();
-app.MapHealthChecks("/health");
+app.MapStaticAssets().AllowAnonymous();
+app.MapOpenPortalKitHealthEndpoints();
 app.MapGet("/admin/system/modules", () => new[]
 {
     IdentityModule.Descriptor,
@@ -399,6 +546,12 @@ app.MapPost("/analytics/events", async (
         analyticsEvent.OccurredAt,
         analyticsEvent.IsBot
     });
+}).AddEndpointFilter(async (invocationContext, next) =>
+{
+    await invocationContext.HttpContext.RequestServices
+        .GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>()
+        .ValidateRequestAsync(invocationContext.HttpContext);
+    return await next(invocationContext);
 });
 app.MapRazorPages()
    .WithStaticAssets();

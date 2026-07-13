@@ -33,6 +33,7 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R10 reference pack portfolio for Finance, Technology, Education, and Entertainment under `industry-packs/`
 - R10 industry pack manifest loader with fail-closed validation, resource checksums, and the `/IndustryPacks` admin catalog
 - R10 audited, checksummed pack enablement state in `db/postgresql/migrations/0013_industry_pack_installations.sql`
+- R11 shared HTTP production baseline with security headers, trace IDs, rate limiting, HSTS, and separate liveness/readiness endpoints
 - Architecture guardrail documents from R0
 - Boundary check script for forbidden core terminology
 
@@ -69,6 +70,8 @@ dotnet run --project src/OpenPortalKit.JobHost
 The API host exposes:
 
 - `/health`
+- `/health/live`
+- `/health/ready`
 - `/api/system/modules`
 - `/robots.txt`
 - `/sitemap.xml`
@@ -105,6 +108,7 @@ R7 dashboard and analytics notes are in `docs/r7-dashboard-analytics.md`.
 R8 Agent Access and AgentSEO notes are in `docs/r8-agent-access.md`.
 R9 Block Template System notes are in `docs/r9-block-template-system.md`.
 R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
+R11 production hardening notes are in `docs/r11-production-hardening.md`.
 
 ## Product Boundary
 

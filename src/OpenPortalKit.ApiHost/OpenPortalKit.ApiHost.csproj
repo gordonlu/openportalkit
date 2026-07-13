@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.0" />
     <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Infrastructure.Production\OpenPortalKit.Infrastructure.Production.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Identity\OpenPortalKit.Modules.Identity.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Assets\OpenPortalKit.Modules.Assets.csproj" />

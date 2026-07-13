@@ -1,0 +1,21 @@
+@page
+@model OpenPortalKit.AdminHost.Pages.Account.LoginModel
+@{
+    ViewData["Title"] = "Sign in";
+}
+<main class="opk-auth-shell">
+    <section class="opk-auth-panel" aria-labelledby="login-title">
+        <span class="opk-eyebrow">Protected administration</span>
+        <h1 id="login-title">Sign in to OpenPortalKit</h1>
+        <p>Use the administrator credential configured for this environment.</p>
+        <form method="post">
+            <input type="hidden" asp-for="ReturnUrl" />
+            <div asp-validation-summary="ModelOnly" class="opk-validation"></div>
+            <label asp-for="Input.UserName"></label>
+            <input asp-for="Input.UserName" autocomplete="username" autofocus />
+            <label asp-for="Input.Password"></label>
+            <input asp-for="Input.Password" autocomplete="current-password" />
+            <button class="opk-button opk-button-primary" type="submit">Sign in</button>
+        </form>
+    </section>
+</main>

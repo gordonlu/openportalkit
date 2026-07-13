@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using Npgsql;
 using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Kernel.Persistence;
+using OpenPortalKit.Infrastructure.Production;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
@@ -30,7 +31,7 @@ using Microsoft.Extensions.Options;
 var builder = WebApplication.CreateBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
 
-builder.Services.AddHealthChecks();
+builder.Services.AddOpenPortalKitProductionHardening(builder.Configuration, adminHost: false);
 builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
 builder.Services.Configure<AnalyticsPrivacyOptions>(
@@ -109,6 +110,9 @@ builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
 
 var app = builder.Build();
 
+app.UseRouting();
+app.UseOpenPortalKitProductionHardening();
+
 app.Use(async (context, next) =>
 {
     if (!IsPublicOutputRequest(context.Request))
@@ -152,7 +156,7 @@ var modules = new[]
 };
 
 app.MapGet("/", () => Results.Redirect("/health"));
-app.MapHealthChecks("/health");
+app.MapOpenPortalKitHealthEndpoints();
 
 app.MapGet("/api/system/modules", () => modules.Select(module => new
 {
