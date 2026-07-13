@@ -31,11 +31,6 @@ public sealed class PublicPageQueryService
         CancellationToken cancellationToken = default)
     {
         var now = asOf ?? DateTimeOffset.UtcNow;
-        var pages = await _store.ListAsync(siteId, cancellationToken);
-        return pages
-            .Where(page => page.Status == PortalPageStatus.Published &&
-                page.PublishedAt is not null &&
-                page.PublishedAt <= now)
-            .ToArray();
+        return await _store.ListPublishedAsync(siteId, now, cancellationToken);
     }
 }

@@ -7,6 +7,7 @@
     <ProjectReference Include="..\OpenPortalKit.Infrastructure.Production\OpenPortalKit.Infrastructure.Production.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Identity\OpenPortalKit.Modules.Identity.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.IndustryPacks\OpenPortalKit.Modules.IndustryPacks.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Migration\OpenPortalKit.Modules.Migration.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Assets\OpenPortalKit.Modules.Assets.csproj" />
     <ProjectReference Include="..\OpenPortalKit.Modules.Workflow\OpenPortalKit.Modules.Workflow.csproj" />

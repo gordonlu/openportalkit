@@ -1,12 +1,15 @@
 using Microsoft.AspNetCore.Http;
 using OpenPortalKit.Infrastructure.Production;
+using Microsoft.Extensions.Configuration;
 
 var tests = new (string Name, Action Run)[]
 {
     ("security policy emits browser hardening headers", SecurityPolicyIsComplete),
     ("trace middleware accepts bounded safe identifiers", TraceIdentifierAcceptsSafeInput),
     ("trace middleware rejects unsafe identifiers", TraceIdentifierRejectsUnsafeInput),
-    ("production limits are enabled by default", ProductionDefaultsAreDefensive)
+    ("production limits are enabled by default", ProductionDefaultsAreDefensive),
+    ("redis endpoint parsing is bounded", RedisEndpointParsingIsBounded),
+    ("production host configuration fails closed", ProductionHostConfigurationFailsClosed)
 };
 
 foreach (var test in tests)
@@ -60,6 +63,43 @@ static void ProductionDefaultsAreDefensive()
         "Admin rate limit must be stricter than the public limit.");
     Assert(options.LoginAttemptsPerFiveMinutes <= 10,
         "Login endpoint must use a low request budget.");
+}
+
+static void RedisEndpointParsingIsBounded()
+{
+    Assert(RedisReadinessHealthCheck.TryParseEndpoint("redis.internal:6380,abortConnect=false", out var host, out var port),
+        "Redis endpoint was not parsed.");
+    Assert(host == "redis.internal" && port == 6380, "Redis host or port was parsed incorrectly.");
+    Assert(!RedisReadinessHealthCheck.TryParseEndpoint("", out _, out _), "Empty Redis endpoint was accepted.");
+}
+
+static void ProductionHostConfigurationFailsClosed()
+{
+    var wildcard = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["AllowedHosts"] = "*",
+        ["PublicBaseUrl"] = "http://portal.example"
+    }).Build();
+    AssertThrows<InvalidOperationException>(() =>
+        ProductionConfigurationValidator.ValidateWebHost(wildcard, isDevelopment: false));
+    AssertThrows<InvalidOperationException>(() =>
+        ProductionConfigurationValidator.ValidateHttpsEndpoint(wildcard, "PublicBaseUrl", isDevelopment: false));
+
+    var production = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["AllowedHosts"] = "portal.example;admin.portal.example",
+        ["PublicBaseUrl"] = "https://portal.example"
+    }).Build();
+    ProductionConfigurationValidator.ValidateWebHost(production, isDevelopment: false);
+    ProductionConfigurationValidator.ValidateHttpsEndpoint(production, "PublicBaseUrl", isDevelopment: false);
+    ProductionConfigurationValidator.ValidateWebHost(wildcard, isDevelopment: true);
+}
+
+static void AssertThrows<TException>(Action action) where TException : Exception
+{
+    try { action(); }
+    catch (TException) { return; }
+    throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
 }
 
 static void Assert(bool condition, string message)

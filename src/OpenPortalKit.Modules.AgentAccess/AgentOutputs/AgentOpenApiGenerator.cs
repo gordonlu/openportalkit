@@ -37,17 +37,19 @@ public static class AgentOpenApiGenerator
         return new Dictionary<string, object?>
         {
             ["/api/public"] = GetPath("Public API discovery document."),
-            ["/api/public/content"] = GetPath("Published public content summaries."),
-            ["/api/public/content/{slug}.json"] = GetPath("Machine-readable JSON snapshot for one public content item."),
-            ["/content/{slug}.md"] = GetPath("Markdown snapshot for one public content item."),
-            ["/pages/{slug}"] = GetPath("Server-rendered public page assembled from a versioned template."),
-            ["/pages/{slug}.md"] = GetPath("Markdown snapshot for one public page."),
-            ["/api/public/pages/{slug}.json"] = GetPath("Machine-readable JSON snapshot for one public page."),
+            ["/api/public/content"] = GetPaginatedPath("Published public content summaries."),
+            ["/api/public/content/{slug}.json"] = GetConditionalPath("Machine-readable JSON snapshot for one public content item."),
+            ["/content/{slug}.md"] = GetConditionalPath("Markdown snapshot for one public content item."),
+            ["/pages/{slug}"] = GetConditionalPath("Server-rendered public page assembled from a versioned template."),
+            ["/pages/{slug}.md"] = GetConditionalPath("Markdown snapshot for one public page."),
+            ["/api/public/pages/{slug}.json"] = GetConditionalPath("Machine-readable JSON snapshot for one public page."),
             ["/api/public/datasets"] = GetPath("Public dataset summaries."),
-            ["/api/public/datasets/{code}"] = GetPath("Public dataset detail with traceability."),
-            ["/api/public/datasets/{code}/records"] = GetPath("Public dataset records."),
-            ["/api/public/datasets/{code}/schema"] = GetPath("Public dataset schema."),
-            ["/api/public/search"] = GetPath("Public full-text search."),
+            ["/api/public/datasets/{code}"] = GetConditionalPath("Public dataset detail with traceability."),
+            ["/api/public/datasets/{code}/records"] = GetPaginatedPath("Public dataset records."),
+            ["/api/public/datasets/{code}/records/{recordKey}"] = GetConditionalPath("One traceable public dataset record."),
+            ["/api/public/datasets/{code}/schema"] = GetConditionalPath("Public dataset schema."),
+            ["/api/public/datasets/{code}/export.csv"] = GetConditionalPath("CSV export of public dataset records."),
+            ["/api/public/search"] = GetPaginatedPath("Public full-text search."),
             ["/sitemap.xml"] = GetPath("XML sitemap."),
             ["/rss.xml"] = GetPath("RSS feed."),
             ["/robots.txt"] = GetPath("Crawler and AI bot policy."),
@@ -73,6 +75,58 @@ public static class AgentOpenApiGenerator
                     }
                 }
             }
+        };
+    }
+
+    private static Dictionary<string, object?> GetConditionalPath(string description)
+    {
+        var path = GetPath(description);
+        var operation = (Dictionary<string, object?>)path["get"]!;
+        operation["responses"] = new Dictionary<string, object?>
+        {
+            ["200"] = new Dictionary<string, object?> { ["description"] = "OK" },
+            ["304"] = new Dictionary<string, object?> { ["description"] = "Not modified" },
+            ["404"] = new Dictionary<string, object?> { ["description"] = "Not found" }
+        };
+        return path;
+    }
+
+    private static Dictionary<string, object?> GetPaginatedPath(string description)
+    {
+        var path = GetPath(description);
+        var operation = (Dictionary<string, object?>)path["get"]!;
+        operation["parameters"] = new object[]
+        {
+            QueryInteger("offset", 0, 0, null),
+            QueryInteger("limit", 20, 1, 100)
+        };
+        operation["responses"] = new Dictionary<string, object?>
+        {
+            ["200"] = new Dictionary<string, object?> { ["description"] = "Paginated response" },
+            ["400"] = new Dictionary<string, object?> { ["description"] = "Invalid pagination" }
+        };
+        return path;
+    }
+
+    private static Dictionary<string, object?> QueryInteger(
+        string name,
+        int defaultValue,
+        int minimum,
+        int? maximum)
+    {
+        var schema = new Dictionary<string, object?>
+        {
+            ["type"] = "integer",
+            ["default"] = defaultValue,
+            ["minimum"] = minimum
+        };
+        if (maximum is not null) schema["maximum"] = maximum;
+        return new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["in"] = "query",
+            ["required"] = false,
+            ["schema"] = schema
         };
     }
 }

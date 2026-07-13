@@ -57,6 +57,25 @@ public sealed class InMemoryPageStore : IPageStore
         }
     }
 
+    public Task<IReadOnlyList<PortalPage>> ListPublishedAsync(
+        Guid siteId,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<PortalPage>>(_pages
+                .Where(page => page.SiteId == siteId &&
+                    page.Status == PortalPageStatus.Published &&
+                    page.PublishedAt is not null &&
+                    page.PublishedAt <= asOf)
+                .OrderBy(page => page.Title, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(page => page.Id)
+                .ToArray());
+        }
+    }
+
     public Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
         Guid pageId,
         CancellationToken cancellationToken = default)

@@ -29,6 +29,7 @@ Kernel must stay industry-neutral.
 - Dashboard: operational and publishing health metrics
 - Audit: audit queries and retention behavior
 - Jobs: job scheduling, retries, idempotency, background handlers
+- Migration: traceable dry-run analysis and controlled legacy import workflows
 
 ## Dependency Rules
 
@@ -38,3 +39,4 @@ Kernel must stay industry-neutral.
 - Cross-module calls should go through explicit contracts or events.
 - Dashboard reads and aggregates; it must not own source business state.
 - Industry packs may use generic module extension points but must not create core dependencies.
+- Migration may depend on generic Content, Data, and SEO contracts; those modules must not depend on Migration.

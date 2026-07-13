@@ -11,11 +11,41 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace OpenPortalKit.Infrastructure.Production;
 
 public static class ProductionHardeningExtensions
 {
+    public static IServiceCollection AddDatabaseReadinessCheck(
+        this IServiceCollection services,
+        string providerInvariantName,
+        string connectionString)
+    {
+        services.AddHealthChecks().Add(new HealthCheckRegistration(
+            "postgres",
+            _ => new DatabaseReadinessHealthCheck(providerInvariantName, connectionString),
+            HealthStatus.Unhealthy,
+            ["ready"]));
+        return services;
+    }
+
+    public static IServiceCollection AddRedisReadinessCheck(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (!RedisReadinessHealthCheck.TryParseEndpoint(connectionString, out var host, out var port))
+        {
+            throw new InvalidOperationException("Redis connection string must begin with a host and optional port.");
+        }
+        services.AddHealthChecks().Add(new HealthCheckRegistration(
+            "redis",
+            _ => new RedisReadinessHealthCheck(host, port),
+            HealthStatus.Unhealthy,
+            ["ready"]));
+        return services;
+    }
+
     public static IServiceCollection AddOpenPortalKitProductionHardening(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -122,14 +152,33 @@ public static class ProductionHardeningExtensions
     {
         endpoints.MapHealthChecks("/health/live", new HealthCheckOptions
         {
-            Predicate = check => check.Tags.Contains("live")
+            Predicate = check => check.Tags.Contains("live"),
+            ResponseWriter = WriteHealthResponseAsync
         }).AllowAnonymous();
         endpoints.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = check => check.Tags.Contains("ready")
+            Predicate = check => check.Tags.Contains("ready"),
+            ResponseWriter = WriteHealthResponseAsync
         }).AllowAnonymous();
         endpoints.MapGet("/health", () => Results.Redirect("/health/ready", permanent: false))
             .AllowAnonymous();
         return endpoints;
+    }
+
+    private static Task WriteHealthResponseAsync(HttpContext context, HealthReport report)
+    {
+        context.Response.ContentType = "application/json; charset=utf-8";
+        return context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            status = report.Status.ToString(),
+            durationMilliseconds = Math.Round(report.TotalDuration.TotalMilliseconds, 2),
+            checks = report.Entries.OrderBy(entry => entry.Key).Select(entry => new
+            {
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                durationMilliseconds = Math.Round(entry.Value.Duration.TotalMilliseconds, 2),
+                description = entry.Value.Description
+            })
+        }));
     }
 }

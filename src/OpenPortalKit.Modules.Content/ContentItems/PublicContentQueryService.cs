@@ -25,6 +25,18 @@ public sealed class PublicContentQueryService
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<PublicContentDetail>> ListPublishedDetailsAsync(
+        ContentListQuery query,
+        DateTimeOffset? asOf = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var now = asOf ?? DateTimeOffset.UtcNow;
+        var items = await _store.ListAsync(query, cancellationToken);
+        return items.Where(item => IsPubliclyVisible(item, now)).Select(ToDetail).ToArray();
+    }
+
     public async Task<PublicContentDetail?> FindPublishedBySlugAsync(
         Guid siteId,
         string slug,

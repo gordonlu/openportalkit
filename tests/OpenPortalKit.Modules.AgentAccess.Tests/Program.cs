@@ -110,6 +110,12 @@ static Task OpenApiDocumentDescribesPublicReadEndpoints()
     Assert.True(paths.TryGetProperty("/pages/{slug}", out _), "Expected public page path.");
     Assert.True(paths.TryGetProperty("/pages/{slug}.md", out _), "Expected public page Markdown path.");
     Assert.True(paths.TryGetProperty("/api/public/pages/{slug}.json", out _), "Expected public page JSON path.");
+    var contentGet = paths.GetProperty("/api/public/content").GetProperty("get");
+    Assert.Equal(2, contentGet.GetProperty("parameters").GetArrayLength());
+    Assert.True(contentGet.GetProperty("responses").TryGetProperty("400", out _), "Expected pagination validation response.");
+    Assert.True(paths.GetProperty("/api/public/content/{slug}.json").GetProperty("get")
+        .GetProperty("responses").TryGetProperty("304", out _), "Expected conditional GET response.");
+    Assert.True(paths.TryGetProperty("/api/public/datasets/{code}/records/{recordKey}", out _), "Expected dataset record path.");
     Assert.True(paths.TryGetProperty("/llms.txt", out _), "Expected llms.txt path.");
     Assert.True(paths.TryGetProperty("/.well-known/agent.json", out _), "Expected agent manifest path.");
 

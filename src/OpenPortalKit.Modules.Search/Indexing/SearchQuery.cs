@@ -7,4 +7,5 @@ public sealed record SearchQuery(
     IReadOnlyList<string>? TargetTypes = null,
     IReadOnlyList<string>? Tags = null,
     DateTimeOffset? AsOf = null,
-    int Limit = 20);
+    int Limit = 20,
+    int Offset = 0);

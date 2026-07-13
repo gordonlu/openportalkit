@@ -1,0 +1,101 @@
+@page
+@model OpenPortalKit.AdminHost.Pages.Migration.IndexModel
+@using OpenPortalKit.Modules.Migration.LegacyContent
+@{
+    ViewData["Title"] = "Legacy Migration";
+}
+
+<section class="opk-admin-shell">
+    <aside class="opk-sidebar" aria-label="Admin navigation">
+        <a class="opk-brand" asp-page="/Index"><span class="opk-brand-mark">OP</span><span><strong>OpenPortalKit</strong><small>Admin</small></span></a>
+        <nav class="opk-nav">
+            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
+            <a class="opk-nav-link is-active" asp-page="/Migration/Index"><span class="opk-nav-icon"></span>Migration</a>
+            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
+            <a class="opk-nav-link" asp-page="/Templates/Index"><span class="opk-nav-icon"></span>Templates</a>
+            <a class="opk-nav-link" asp-page="/IndustryPacks/Index"><span class="opk-nav-icon"></span>Industry Packs</a>
+        </nav>
+        <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>Dry run only</span></div>
+    </aside>
+
+    <div class="opk-workspace">
+        <header class="opk-topbar"><div><h1>Legacy Content Migration</h1><p>Validate, stage, and review legacy packages before controlled promotion.</p></div></header>
+
+        @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link">@Model.StatusMessage</div></div>
+        }
+
+        @if (!ViewContext.ModelState.IsValid)
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>
+        }
+
+        <form class="opk-panel opk-migration-form" method="post" enctype="multipart/form-data">
+            <div class="opk-panel-header"><div><h2>Source Package</h2><p>Staging revalidates the uploaded CSV and stores its immutable report; it does not publish content.</p></div><span class="opk-chip is-draft">No public writes</span></div>
+            <div class="opk-migration-fields">
+                <label>Source system<input asp-for="Source" placeholder="legacy-mvc5" /></label>
+                <label>Import batch<input asp-for="ImportBatch" placeholder="batch-20260713" /></label>
+                <label>As-of date<input asp-for="AsOfDate" type="date" /></label>
+                <label>Schema version<input asp-for="SchemaVersion" /></label>
+                <label class="is-wide">CSV file<input asp-for="CsvFile" type="file" accept=".csv,text/csv" /><small>Maximum 5 MB. Required columns: source_id, title, slug, summary, body, old_url, asset_paths.</small></label>
+                <label class="is-wide">Available asset paths<textarea asp-for="AssetInventory" rows="5" placeholder="/assets/document.pdf&#10;/images/cover.jpg"></textarea><small>One path per line. Referenced files absent from this inventory are blocking errors.</small></label>
+            </div>
+            <div class="opk-editor-actions">
+                <button class="opk-button" type="submit" asp-page-handler="Analyze">Analyze CSV</button>
+                <button class="opk-button opk-button-primary" type="submit" asp-page-handler="Stage">Validate and stage</button>
+            </div>
+        </form>
+
+        @if (Model.Report is not null)
+        {
+            <section class="opk-migration-summary" aria-label="Migration analysis summary">
+                <div><strong>@Model.Report.TotalRows</strong><span>Source rows</span></div>
+                <div><strong>@Model.Report.ValidRows</strong><span>Valid rows</span></div>
+                <div><strong>@Model.Report.Issues.Count(issue => issue.Severity == LegacyMigrationIssueSeverity.Error)</strong><span>Blocking errors</span></div>
+                <div><strong>@Model.Report.Redirects.Count</strong><span>URL mappings</span></div>
+            </section>
+            <section class="opk-panel opk-migration-report">
+                <div class="opk-panel-header"><div><h2>Dry-run Report</h2><p>@Model.Report.Source · @Model.Report.ImportBatch · as of @Model.Report.AsOfDate · @Model.Report.SchemaVersion</p></div><span class="opk-chip @(Model.Report.CanApply ? "is-approved" : "is-critical")">@(Model.Report.CanApply ? "Ready" : "Blocked")</span></div>
+                <dl class="opk-trace-grid"><div><dt>Checksum</dt><dd title="@Model.Report.Checksum">@Model.Report.Checksum[..16]</dd></div><div><dt>Analyzed</dt><dd>@Model.Report.AnalyzedAt.ToString("u")</dd></div></dl>
+                @if (Model.Report.Issues.Count > 0)
+                {
+                    <div class="opk-migration-issues">@foreach (var issue in Model.Report.Issues){<article><span class="opk-chip @(issue.Severity == LegacyMigrationIssueSeverity.Error ? "is-critical" : "is-draft")">@issue.Severity</span><strong>Row @issue.RowNumber · @issue.Code</strong><p>@issue.Message</p></article>}</div>
+                }
+                <div class="opk-table-wrap"><table class="opk-table"><thead><tr><th>Old URL</th><th>New URL</th><th>Row</th></tr></thead><tbody>@foreach(var redirect in Model.Report.Redirects){<tr><td><code>@redirect.SourcePath</code></td><td><code>@redirect.TargetPath</code></td><td>@redirect.RowNumber</td></tr>}</tbody></table></div>
+            </section>
+        }
+
+        <section class="opk-panel">
+            <div class="opk-panel-header"><div><h2>Staged Batches</h2><p>Trace records are retained after rollback. Changed input requires a new import batch.</p></div><span class="opk-chip">@Model.Batches.Count total</span></div>
+            <div class="opk-table-wrap">
+                <table class="opk-table">
+                    <thead><tr><th>Batch</th><th>Source</th><th>Rows</th><th>Checksum</th><th>Status</th><th>Staged</th><th></th></tr></thead>
+                    <tbody>
+                    @if (Model.Batches.Count == 0)
+                    {
+                        <tr><td colspan="7">No migration batches have been staged.</td></tr>
+                    }
+                    @foreach (var batch in Model.Batches)
+                    {
+                        <tr>
+                            <td><strong>@batch.ImportBatch</strong><small>@batch.SchemaVersion · @batch.AsOfDate</small></td>
+                            <td>@batch.Source</td><td>@batch.ValidRows / @batch.TotalRows</td>
+                            <td><code title="@batch.SourceChecksum">@batch.SourceChecksum[..12]</code></td>
+                            <td><span class="opk-chip @(batch.Status == LegacyMigrationBatchStatus.Staged ? "is-approved" : "is-draft")">@batch.Status</span></td>
+                            <td>@batch.StagedAt.ToString("u")</td>
+                            <td><div class="opk-migration-actions">
+                            <a class="opk-button" asp-page-handler="Report" asp-route-batchId="@batch.Id">Report</a>
+                            @if (batch.Status == LegacyMigrationBatchStatus.Staged)
+                            {
+                                <form method="post" asp-page-handler="Rollback"><input type="hidden" name="batchId" value="@batch.Id" /><button class="opk-button" type="submit">Rollback</button></form>
+                            }
+                            </div></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</section>

@@ -8,7 +8,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("admin search can include non public documents", AdminSearchCanIncludeNonPublicDocuments),
     ("archived documents are hidden unless requested", ArchivedDocumentsAreHiddenUnlessRequested),
     ("search filters by target type and tags", SearchFiltersByTargetTypeAndTags),
+    ("search applies stable offset pagination", SearchAppliesStableOffsetPagination),
     ("reindexing is repeatable and idempotent", ReindexingIsRepeatableAndIdempotent),
+    ("reindexing removes stale documents", ReindexingRemovesStaleDocuments),
+    ("failed reindex preserves the previous snapshot", FailedReindexPreservesPreviousSnapshot),
     ("outbox handler indexes resolved document", OutboxHandlerIndexesResolvedDocument)
 };
 
@@ -85,6 +88,19 @@ static async Task SearchFiltersByTargetTypeAndTags()
     Assert.Equal("dataset:launch", dataResults[0].Document.Id);
 }
 
+static async Task SearchAppliesStableOffsetPagination()
+{
+    var index = new InMemorySearchIndex();
+    await index.UpsertAsync(CreateDocument("content:a", "ContentItem", "Alpha Launch", SearchVisibility.Public));
+    await index.UpsertAsync(CreateDocument("content:b", "ContentItem", "Beta Launch", SearchVisibility.Public));
+
+    var first = await index.SearchAsync(new SearchQuery("launch", Limit: 1));
+    var second = await index.SearchAsync(new SearchQuery("launch", Limit: 1, Offset: 1));
+
+    Assert.Equal("content:a", first.Single().Document.Id);
+    Assert.Equal("content:b", second.Single().Document.Id);
+}
+
 static async Task ReindexingIsRepeatableAndIdempotent()
 {
     var index = new InMemorySearchIndex();
@@ -101,6 +117,38 @@ static async Task ReindexingIsRepeatableAndIdempotent()
     Assert.Equal(1, first.IndexedDocuments);
     Assert.Equal(1, second.IndexedDocuments);
     Assert.Equal(1, results.Count);
+}
+
+static async Task ReindexingRemovesStaleDocuments()
+{
+    var index = new InMemorySearchIndex();
+    await index.UpsertAsync(CreateDocument("content:stale", "ContentItem", "Stale Launch", SearchVisibility.Public));
+    var source = new FixedSearchDocumentSource(new[]
+    {
+        CreateDocument("content:current", "ContentItem", "Current Launch", SearchVisibility.Public)
+    });
+
+    var result = await new SearchReindexer(index, new[] { source }).ReindexAsync();
+
+    Assert.Equal(1, result.IndexedDocuments);
+    Assert.Equal<SearchDocument?>(null, await index.FindByIdAsync("content:stale"));
+    Assert.Equal("content:current", (await index.FindByIdAsync("content:current"))?.Id);
+}
+
+static async Task FailedReindexPreservesPreviousSnapshot()
+{
+    var index = new InMemorySearchIndex();
+    await index.UpsertAsync(CreateDocument("content:existing", "ContentItem", "Existing Launch", SearchVisibility.Public));
+    var duplicate = CreateDocument("content:duplicate", "ContentItem", "Duplicate", SearchVisibility.Public);
+    var reindexer = new SearchReindexer(index, new ISearchDocumentSource[]
+    {
+        new FixedSearchDocumentSource(new[] { duplicate }),
+        new FixedSearchDocumentSource(new[] { duplicate })
+    });
+
+    await Assert.ThrowsAsync<InvalidOperationException>(() => reindexer.ReindexAsync());
+    Assert.Equal("content:existing", (await index.FindByIdAsync("content:existing"))?.Id);
+    Assert.Equal<SearchDocument?>(null, await index.FindByIdAsync("content:duplicate"));
 }
 
 static async Task OutboxHandlerIndexesResolvedDocument()
@@ -192,5 +240,12 @@ internal static class Assert
         {
             throw new InvalidOperationException($"Expected '{expected}', got '{actual}'.");
         }
+    }
+
+    public static async Task ThrowsAsync<TException>(Func<Task> action) where TException : Exception
+    {
+        try { await action(); }
+        catch (TException) { return; }
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 }

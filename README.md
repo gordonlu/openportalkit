@@ -34,6 +34,12 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R10 industry pack manifest loader with fail-closed validation, resource checksums, and the `/IndustryPacks` admin catalog
 - R10 audited, checksummed pack enablement state in `db/postgresql/migrations/0013_industry_pack_installations.sql`
 - R11 shared HTTP production baseline with security headers, trace IDs, rate limiting, HSTS, and separate liveness/readiness endpoints
+- R11 legacy-content migration analysis and controlled staging with traceable CSV validation, immutable batch journals, audited rollback, duplicate detection, missing-asset reporting, and URL mapping review
+- R11 failure-safe search snapshot rebuilds that remove stale documents and keep the previous index on validation failure
+- R11 bounded public `Cache-Control` policy for browser/CDN caching without caching admin, health, error, or cookie-setting responses
+- R11 bounded public API pagination, conditional `ETag`/`Last-Modified` requests, and removal of content-list N+1 reads
+- R11 PostgreSQL query audit with targeted analytics and public-page indexes in `0015_query_performance_indexes.sql`
+- R11 closed acceptance baseline with fail-closed production hosts, upload signature validation, dependency scanning, and sequential CI tests
 - Architecture guardrail documents from R0
 - Boundary check script for forbidden core terminology
 

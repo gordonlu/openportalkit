@@ -8,7 +8,14 @@ OpenPortalKit accepts changes that strengthen the publishing framework while pre
 2. Keep changes scoped to the relevant module.
 3. Add or update tests for behavior changes.
 4. Update docs when public contracts, module boundaries, AgentSEO outputs, dashboard metrics, or migration behavior change.
-5. Run build and boundary checks.
+5. Run the single-worker build, all test projects, dependency scan, and boundary checks.
+
+```powershell
+dotnet build OpenPortalKit.sln -m:1
+./tools/run-tests.ps1
+./tools/check-vulnerable-packages.ps1
+./tools/check-boundaries.ps1
+```
 
 ## Pull Request Expectations
 

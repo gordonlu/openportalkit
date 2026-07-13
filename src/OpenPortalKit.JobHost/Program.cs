@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using OpenPortalKit.Infrastructure.Production;
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
@@ -12,6 +13,10 @@ using OpenPortalKit.Modules.Seo.Revalidation;
 
 var builder = Host.CreateApplicationBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
+ProductionConfigurationValidator.ValidateHttpsEndpoint(
+    builder.Configuration,
+    "OpenPortalKit:AgentAccess:OutputGeneration:PublicBaseUrl",
+    builder.Environment.IsDevelopment());
 
 var persistenceOptions = builder.Configuration
     .GetSection(PostgresPersistenceOptions.SectionName)
@@ -44,6 +49,8 @@ var workerOptions = builder.Configuration
     .GetSection(OutboxWorkerOptions.SectionName)
     .Get<OutboxWorkerOptions>() ?? new OutboxWorkerOptions();
 workerOptions.Validate();
+builder.Services.Configure<HostOptions>(options =>
+    options.ShutdownTimeout = TimeSpan.FromSeconds(workerOptions.ShutdownTimeoutSeconds));
 
 builder.Services.AddSingleton(persistenceOptions);
 builder.Services.AddSingleton(agentOutputOptions);
@@ -83,10 +90,13 @@ internal sealed class OutboxWorkerOptions
 
     public int PollIntervalSeconds { get; set; } = 5;
 
+    public int ShutdownTimeoutSeconds { get; set; } = 30;
+
     public void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(BatchSize);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(PollIntervalSeconds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(ShutdownTimeoutSeconds, 5);
     }
 }
 
@@ -95,6 +105,7 @@ internal sealed class PublishingOutboxWorker : BackgroundService
     private readonly OutboxProcessor _processor;
     private readonly OutboxWorkerOptions _options;
     private readonly ILogger<PublishingOutboxWorker> _logger;
+    private readonly CancellationTokenSource _inFlightCancellation = new();
 
     public PublishingOutboxWorker(
         OutboxProcessor processor,
@@ -115,7 +126,7 @@ internal sealed class PublishingOutboxWorker : BackgroundService
                 OutboxProcessingResult result;
                 do
                 {
-                    result = await _processor.ProcessPendingAsync(_options.BatchSize, stoppingToken);
+                    result = await _processor.ProcessPendingAsync(_options.BatchSize, _inFlightCancellation.Token);
                     if (result.TotalCount > 0)
                     {
                         _logger.LogInformation(
@@ -127,7 +138,8 @@ internal sealed class PublishingOutboxWorker : BackgroundService
                 }
                 while (result.ProcessedCount == _options.BatchSize && !stoppingToken.IsCancellationRequested);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (
+                stoppingToken.IsCancellationRequested || _inFlightCancellation.IsCancellationRequested)
             {
                 break;
             }
@@ -136,7 +148,36 @@ internal sealed class PublishingOutboxWorker : BackgroundService
                 _logger.LogError(exception, "Publishing outbox worker failed while polling for messages.");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), stoppingToken);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Publishing outbox worker is draining the current batch for up to {ShutdownTimeoutSeconds} seconds.",
+            _options.ShutdownTimeoutSeconds);
+        try
+        {
+            await base.StopAsync(cancellationToken);
+            _logger.LogInformation("Publishing outbox worker stopped after draining in-flight work.");
+        }
+        finally
+        {
+            await _inFlightCancellation.CancelAsync();
+        }
+    }
+
+    public override void Dispose()
+    {
+        _inFlightCancellation.Dispose();
+        base.Dispose();
     }
 }

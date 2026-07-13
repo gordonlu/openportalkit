@@ -28,6 +28,8 @@ using OpenPortalKit.Modules.Identity;
 using OpenPortalKit.Modules.Identity.Authentication;
 using OpenPortalKit.Modules.IndustryPacks;
 using OpenPortalKit.Modules.Jobs;
+using OpenPortalKit.Modules.Migration;
+using OpenPortalKit.Modules.Migration.LegacyContent;
 using OpenPortalKit.Modules.Search;
 using OpenPortalKit.Modules.Seo;
 using OpenPortalKit.Modules.Seo.Revalidation;
@@ -42,6 +44,11 @@ using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
+ProductionConfigurationValidator.ValidateWebHost(builder.Configuration, builder.Environment.IsDevelopment());
+ProductionConfigurationValidator.ValidateHttpsEndpoint(
+    builder.Configuration,
+    "OpenPortalKit:AgentAccess:OutputGeneration:PublicBaseUrl",
+    builder.Environment.IsDevelopment());
 
 var adminAuthentication = builder.Configuration
     .GetSection(AdminAuthenticationOptions.SectionName)
@@ -220,6 +227,24 @@ if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
     persistencePostgres.ConnectionString = builder.Configuration.GetConnectionString(
         persistencePostgres.ConnectionStringName);
 }
+if (persistencePostgres.Enabled)
+{
+    if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
+    {
+        throw new InvalidOperationException("PostgreSQL persistence is enabled without a connection string.");
+    }
+    builder.Services.AddDatabaseReadinessCheck(
+        persistencePostgres.ProviderInvariantName,
+        persistencePostgres.ConnectionString);
+}
+var configuredStorage = builder.Configuration
+    .GetSection(OpenPortalKitStorageOptions.SectionName)
+    .Get<OpenPortalKitStorageOptions>() ?? new OpenPortalKitStorageOptions();
+var redisConnection = builder.Configuration.GetConnectionString(configuredStorage.CacheConnectionStringName);
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddRedisReadinessCheck(redisConnection);
+}
 
 builder.Services.AddSingleton(persistencePostgres);
 var dashboardPostgres = builder.Configuration
@@ -265,6 +290,7 @@ if (persistencePostgres.Enabled)
     builder.Services.AddSingleton<IAuditLogStore, PostgresAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, PostgresPublicOutputRevalidationStore>();
     builder.Services.AddSingleton<IIndustryPackInstallationStore, PostgresIndustryPackInstallationStore>();
+    builder.Services.AddSingleton<ILegacyMigrationBatchStore, PostgresLegacyMigrationBatchStore>();
 }
 else
 {
@@ -273,6 +299,7 @@ else
     builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, InMemoryPublicOutputRevalidationStore>();
     builder.Services.AddSingleton<IIndustryPackInstallationStore, InMemoryIndustryPackInstallationStore>();
+    builder.Services.AddSingleton<ILegacyMigrationBatchStore, InMemoryLegacyMigrationBatchStore>();
 }
 
 builder.Services.AddSingleton<AuditRecorder>();
@@ -309,6 +336,8 @@ foreach (var resourceKind in Enum.GetValues<IndustryPackResourceKind>())
             provider.GetRequiredService<IDataSetStore>()));
 }
 builder.Services.AddSingleton<IndustryPackInstallationService>();
+builder.Services.AddSingleton<LegacyContentMigrationAnalyzer>();
+builder.Services.AddSingleton<LegacyMigrationStagingService>();
 builder.Services.AddHostedService<IndustryPackRehydrationHostedService>();
 builder.Services.AddSingleton<IPageBlockDataResolver, AdminPageBlockDataResolver>();
 builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
@@ -397,7 +426,8 @@ app.MapGet("/admin/system/modules", () => new[]
     AgentAccessModule.Descriptor,
     DashboardModule.Descriptor,
     AuditModule.Descriptor,
-    JobsModule.Descriptor
+    JobsModule.Descriptor,
+    MigrationModule.Descriptor
 });
 app.MapGet("/admin/system/storage", (IConfiguration configuration) =>
 {

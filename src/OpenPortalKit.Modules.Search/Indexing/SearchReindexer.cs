@@ -19,7 +19,7 @@ public sealed class SearchReindexer
     public async Task<SearchReindexResult> ReindexAsync(CancellationToken cancellationToken = default)
     {
         var startedAt = _clock();
-        var count = 0;
+        var replacement = new Dictionary<string, SearchDocument>(StringComparer.Ordinal);
 
         foreach (var source in _sources)
         {
@@ -27,11 +27,17 @@ public sealed class SearchReindexer
 
             foreach (var document in documents)
             {
-                await _index.UpsertAsync(document, cancellationToken);
-                count++;
+                ArgumentNullException.ThrowIfNull(document);
+                ArgumentException.ThrowIfNullOrWhiteSpace(document.Id);
+                if (!replacement.TryAdd(document.Id, document))
+                {
+                    throw new InvalidOperationException(
+                        $"Search rebuild produced duplicate document ID '{document.Id}'.");
+                }
             }
         }
 
-        return new SearchReindexResult(count, startedAt, _clock());
+        await _index.ReplaceAllAsync(replacement.Values.ToArray(), cancellationToken);
+        return new SearchReindexResult(replacement.Count, startedAt, _clock());
     }
 }

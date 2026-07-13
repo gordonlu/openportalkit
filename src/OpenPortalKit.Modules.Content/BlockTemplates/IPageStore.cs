@@ -8,6 +8,11 @@ public interface IPageStore
 
     Task<IReadOnlyList<PortalPage>> ListAsync(Guid? siteId = null, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<PortalPage>> ListPublishedAsync(
+        Guid siteId,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
         Guid pageId,
         CancellationToken cancellationToken = default);

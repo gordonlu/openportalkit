@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenPortalKit.Kernel\OpenPortalKit.Kernel.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Content\OpenPortalKit.Modules.Content.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Data\OpenPortalKit.Modules.Data.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Seo\OpenPortalKit.Modules.Seo.csproj" />
+  </ItemGroup>
+</Project>

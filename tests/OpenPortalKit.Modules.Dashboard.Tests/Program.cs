@@ -917,6 +917,10 @@ static Task PostgresMigrationPreservesDashboardPrivacyAndIndexes()
     Assert.Contains("metadata_json jsonb not null", sql);
     Assert.Contains("ix_opk_analytics_events_site_occurred", sql);
     Assert.Contains("ix_opk_analytics_events_site_type_occurred", sql);
+    var performanceSql = File.ReadAllText(Path.Combine(
+        "db", "postgresql", "migrations", "0015_query_performance_indexes.sql"));
+    Assert.Contains("ix_opk_analytics_events_occurred_id", performanceSql);
+    Assert.Contains("ix_opk_analytics_events_type_occurred_id", performanceSql);
     Assert.Contains("create table if not exists opk_dashboard_snapshots", sql);
     Assert.Contains("source_checksum text not null", sql);
     Assert.Contains("summary_json jsonb not null", sql);
@@ -1004,6 +1008,10 @@ static Task ApiHostCapturesPublicAnalyticsRuntimeEvents()
     Assert.Contains("TryEnqueue", program);
     Assert.Contains("Channel.CreateBounded", program);
     Assert.Contains("IsPublicOutputRequest", program);
+    Assert.Contains("PublicResponseCacheOptions", program);
+    Assert.Contains("stale-while-revalidate", program);
+    Assert.Contains("ApplyConditionalHeaders", program);
+    Assert.Contains("PublicPage<object>", program);
     Assert.Contains("\"api_request\"", program);
     Assert.Contains("\"latency_ms\"", program);
     Assert.Contains("\"status_code\"", program);
@@ -1018,6 +1026,7 @@ static Task ApiHostCapturesPublicAnalyticsRuntimeEvents()
         "OpenPortalKit.ApiHost",
         "appsettings.json"));
     Assert.Contains("\"PostgreSQL\"", production);
+    Assert.Contains("\"PublicCaching\"", production);
     Assert.Contains("\"Enabled\": false", production);
 
     return Task.CompletedTask;

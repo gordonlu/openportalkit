@@ -69,7 +69,7 @@ public static class CsvImportParser
                 payload[headers[columnIndex]] = row[columnIndex];
             }
 
-            rows.Add(new DataImportRow(recordKey, JsonSerializer.Serialize(payload)));
+            rows.Add(new DataImportRow(recordKey, JsonSerializer.Serialize(payload), rowNumber));
         }
 
         return new CsvImportParseResult(rows, errors);

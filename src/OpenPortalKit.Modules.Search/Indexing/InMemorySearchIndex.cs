@@ -32,6 +32,33 @@ public sealed class InMemorySearchIndex : ISearchIndex
         return Task.CompletedTask;
     }
 
+    public Task ReplaceAllAsync(
+        IReadOnlyCollection<SearchDocument> documents,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var replacement = new Dictionary<string, SearchDocument>(StringComparer.Ordinal);
+        foreach (var document in documents)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+            ArgumentException.ThrowIfNullOrWhiteSpace(document.Id);
+            if (!replacement.TryAdd(document.Id, document))
+            {
+                throw new InvalidOperationException($"Search rebuild produced duplicate document ID '{document.Id}'.");
+            }
+        }
+
+        lock (_syncRoot)
+        {
+            _documents.Clear();
+            foreach (var item in replacement) _documents.Add(item.Key, item.Value);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task<SearchDocument?> FindByIdAsync(string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
@@ -51,6 +78,7 @@ public sealed class InMemorySearchIndex : ISearchIndex
         ArgumentNullException.ThrowIfNull(query);
         ArgumentException.ThrowIfNullOrWhiteSpace(query.Term);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(query.Limit);
+        ArgumentOutOfRangeException.ThrowIfNegative(query.Offset);
         cancellationToken.ThrowIfCancellationRequested();
 
         var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
@@ -68,6 +96,7 @@ public sealed class InMemorySearchIndex : ISearchIndex
                 .OrderByDescending(result => result.Score)
                 .ThenByDescending(result => result.Document.PublishedAt ?? result.Document.UpdatedAt)
                 .ThenBy(result => result.Document.Title, StringComparer.OrdinalIgnoreCase)
+                .Skip(query.Offset)
                 .Take(query.Limit)
                 .ToArray());
         }

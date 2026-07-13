@@ -100,6 +100,28 @@ public sealed class PostgresPageStore : IPageStore
         return pages;
     }
 
+    public async Task<IReadOnlyList<PortalPage>> ListPublishedAsync(
+        Guid siteId,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectBase + """
+            where site_id = @site_id
+              and status = 'Published'
+              and published_at <= @as_of
+            order by title asc, id asc
+            """;
+        command.AddParameter("@site_id", siteId, DbType.Guid);
+        command.AddParameter("@as_of", asOf, DbType.DateTimeOffset);
+
+        var pages = new List<PortalPage>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) pages.Add(ReadPage(reader));
+        return pages;
+    }
+
     public async Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
         Guid pageId,
         CancellationToken cancellationToken = default)

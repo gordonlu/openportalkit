@@ -17,7 +17,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("server rendered blocks encode page configuration", ServerRenderedBlocksEncodePageConfiguration),
     ("server rendered blocks resolve public list and data outputs", ServerRenderedBlocksResolvePublicListAndDataOutputs),
     ("page service fixes template version and audits publication", PageServiceFixesTemplateVersionAndAuditsPublication),
+    ("public page listing excludes non-public and future pages", PublicPageListingFiltersAtStoreBoundary),
     ("public query hides drafts archived and expired content", PublicQueryHidesDraftsArchivedAndExpiredContent),
+    ("public detail list reads bodies without per-item lookup", PublicDetailListReadsVisibleBodies),
     ("public query resolves published detail by slug", PublicQueryResolvesPublishedDetailBySlug)
 };
 
@@ -203,6 +205,15 @@ static Task BlockTemplateMigrationPreservesSerializedVersionHistory()
     Assert.Contains("create table if not exists opk_portal_page_versions", pageVersionSql);
     Assert.Contains("primary key (page_id, revision)", pageVersionSql);
     Assert.Contains("snapshot_json jsonb not null", pageVersionSql);
+    var performanceSql = File.ReadAllText(Path.Combine(
+        "db", "postgresql", "migrations", "0015_query_performance_indexes.sql"));
+    Assert.Contains("ix_opk_portal_pages_public_site_title", performanceSql);
+    Assert.Contains("where status = 'Published'", performanceSql);
+
+    var postgresPageStore = File.ReadAllText(Path.Combine(
+        "src", "OpenPortalKit.Modules.Content", "BlockTemplates", "PostgresPageStore.cs"));
+    Assert.Contains("and status = 'Published'", postgresPageStore);
+    Assert.Contains("and published_at <= @as_of", postgresPageStore);
 
     var adminProgram = File.ReadAllText(Path.Combine(
         "src",
@@ -356,6 +367,30 @@ static async Task PublicQueryHidesDraftsArchivedAndExpiredContent()
     Assert.Equal("published", visible[0].Slug);
 }
 
+static async Task PublicPageListingFiltersAtStoreBoundary()
+{
+    var store = new InMemoryPageStore();
+    var siteId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 13, 8, 0, 0, TimeSpan.Zero);
+    await store.UpsertAsync(CreatePageForQuery(siteId, "Visible", PortalPageStatus.Published, now.AddMinutes(-1), now));
+    await store.UpsertAsync(CreatePageForQuery(siteId, "Draft", PortalPageStatus.Draft, null, now));
+    await store.UpsertAsync(CreatePageForQuery(siteId, "Future", PortalPageStatus.Published, now.AddHours(1), now));
+
+    var pages = await new PublicPageQueryService(store).ListPublishedAsync(siteId, now);
+
+    Assert.Equal(1, pages.Count);
+    Assert.Equal("Visible", pages[0].Title);
+}
+
+static PortalPage CreatePageForQuery(
+    Guid siteId,
+    string title,
+    PortalPageStatus status,
+    DateTimeOffset? publishedAt,
+    DateTimeOffset updatedAt) => new(
+        Guid.NewGuid(), siteId, Guid.NewGuid(), 1, title, SlugGenerator.Generate(title), "Summary", status,
+        Array.Empty<BlockInstance>(), Guid.NewGuid(), Guid.NewGuid(), updatedAt.AddHours(-1), updatedAt, publishedAt);
+
 static async Task PublicQueryResolvesPublishedDetailBySlug()
 {
     var store = new InMemoryContentItemStore();
@@ -369,6 +404,21 @@ static async Task PublicQueryResolvesPublishedDetailBySlug()
 
     Assert.Equal("Quarterly Update", detail?.Title);
     Assert.Equal("Body content.", detail?.Body);
+}
+
+static async Task PublicDetailListReadsVisibleBodies()
+{
+    var store = new InMemoryContentItemStore();
+    var siteId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 13, 6, 0, 0, TimeSpan.Zero);
+    await store.AddAsync(CreateContent(siteId, "Visible", "visible", ContentPublicationStatus.Published, now.AddMinutes(-1)));
+    await store.AddAsync(CreateContent(siteId, "Draft", "draft", ContentPublicationStatus.Draft, null));
+
+    var details = await new PublicContentQueryService(store).ListPublishedDetailsAsync(
+        new ContentListQuery(SiteId: siteId), now);
+
+    Assert.Equal(1, details.Count);
+    Assert.Equal("Body content.", details[0].Body);
 }
 
 static ContentPublishingService CreateService(

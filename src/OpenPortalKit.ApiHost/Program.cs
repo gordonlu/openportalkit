@@ -30,8 +30,14 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
+ProductionConfigurationValidator.ValidateWebHost(builder.Configuration, builder.Environment.IsDevelopment());
 
 builder.Services.AddOpenPortalKitProductionHardening(builder.Configuration, adminHost: false);
+var publicCaching = builder.Configuration
+    .GetSection(PublicResponseCacheOptions.SectionName)
+    .Get<PublicResponseCacheOptions>() ?? new PublicResponseCacheOptions();
+publicCaching.Validate();
+builder.Services.AddSingleton(publicCaching);
 builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
 builder.Services.Configure<AnalyticsPrivacyOptions>(
@@ -45,6 +51,24 @@ if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
 {
     persistencePostgres.ConnectionString = builder.Configuration.GetConnectionString(
         persistencePostgres.ConnectionStringName);
+}
+if (persistencePostgres.Enabled)
+{
+    if (string.IsNullOrWhiteSpace(persistencePostgres.ConnectionString))
+    {
+        throw new InvalidOperationException("PostgreSQL persistence is enabled without a connection string.");
+    }
+    builder.Services.AddDatabaseReadinessCheck(
+        persistencePostgres.ProviderInvariantName,
+        persistencePostgres.ConnectionString);
+}
+var configuredStorage = builder.Configuration
+    .GetSection(OpenPortalKitStorageOptions.SectionName)
+    .Get<OpenPortalKitStorageOptions>() ?? new OpenPortalKitStorageOptions();
+var redisConnection = builder.Configuration.GetConnectionString(configuredStorage.CacheConnectionStringName);
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddRedisReadinessCheck(redisConnection);
 }
 
 builder.Services.AddSingleton(persistencePostgres);
@@ -95,6 +119,10 @@ builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore(
 builder.Services.AddSingleton(_ => BuildSampleDataContextAsync().GetAwaiter().GetResult());
 builder.Services.AddSingleton<IDataSetStore>(provider => provider.GetRequiredService<SampleDataContext>().DataSetStore);
 builder.Services.AddSingleton<IDataRecordStore>(provider => provider.GetRequiredService<SampleDataContext>().RecordStore);
+builder.Services.AddSingleton<ISearchIndex>(provider =>
+    BuildSampleSearchIndexAsync(
+        provider.GetRequiredService<IContentItemStore>(),
+        provider.GetRequiredService<SampleDataContext>()).GetAwaiter().GetResult());
 builder.Services.AddSingleton<IPageBlockDataResolver, ApiPublicPageBlockDataResolver>();
 if (persistencePostgres.Enabled)
 {
@@ -112,6 +140,29 @@ var app = builder.Build();
 
 app.UseRouting();
 app.UseOpenPortalKitProductionHardening();
+
+app.Use(async (context, next) =>
+{
+    var options = context.RequestServices.GetRequiredService<PublicResponseCacheOptions>();
+    if (!options.Enabled || !IsPublicOutputRequest(context.Request))
+    {
+        await next();
+        return;
+    }
+
+    context.Response.OnStarting(() =>
+    {
+        if (context.Response.StatusCode is >= 200 and < 300 &&
+            !context.Response.Headers.ContainsKey("Cache-Control") &&
+            !context.Response.Headers.ContainsKey("Set-Cookie"))
+        {
+            context.Response.Headers.CacheControl =
+                $"public, max-age={options.BrowserMaxAgeSeconds}, s-maxage={options.SharedMaxAgeSeconds}, stale-while-revalidate={options.StaleWhileRevalidateSeconds}";
+        }
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
@@ -335,12 +386,20 @@ app.MapGet("/api/openapi.json", (HttpRequest request) =>
     return Results.Text(AgentOpenApiGenerator.Generate(BuildAgentSiteProfile(request)), "application/json; charset=utf-8");
 });
 
-app.MapGet("/api/public/content", async (HttpRequest request, IContentItemStore contentStore) =>
+app.MapGet("/api/public/content", async (
+    HttpRequest request,
+    IContentItemStore contentStore,
+    int offset = 0,
+    int limit = 20) =>
 {
+    if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
     var siteBaseUrl = GetSiteBaseUrl(request);
-    var documents = await GetAgentContentDocumentsAsync(siteBaseUrl, contentStore);
+    var documents = await GetAgentContentDocumentsAsync(
+        siteBaseUrl,
+        contentStore,
+        query: new ContentListQuery(SiteId: GetDefaultSiteId(), Skip: offset, Take: limit + 1));
 
-    return documents
+    var items = documents.Take(limit)
         .Select(document => new
         {
             document.Id,
@@ -354,25 +413,26 @@ app.MapGet("/api/public/content", async (HttpRequest request, IContentItemStore 
             document.PublishedAt,
             document.UpdatedAt,
             document.VisibilityPolicy
-        });
+        }).ToArray();
+    return Results.Ok(new PublicPage<object>(items, offset, limit, documents.Count > limit));
 });
 
 app.MapGet("/content/{slug}.md", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
 {
     var document = await FindAgentContentDocumentAsync(GetSiteBaseUrl(request), contentStore, slug);
-
-    return document is null
-        ? Results.NotFound()
-        : Results.Text(AgentSnapshotGenerator.GenerateMarkdown(document), "text/markdown; charset=utf-8");
+    if (document is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, "content-markdown:" + document.Id, document.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Text(AgentSnapshotGenerator.GenerateMarkdown(document), "text/markdown; charset=utf-8");
 });
 
 app.MapGet("/api/public/content/{slug}.json", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
 {
     var document = await FindAgentContentDocumentAsync(GetSiteBaseUrl(request), contentStore, slug);
-
-    return document is null
-        ? Results.NotFound()
-        : Results.Text(AgentSnapshotGenerator.GenerateJson(document), "application/json; charset=utf-8");
+    if (document is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, "content-json:" + document.Id, document.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Text(AgentSnapshotGenerator.GenerateJson(document), "application/json; charset=utf-8");
 });
 
 app.MapGet("/pages/{slug}", async (
@@ -389,6 +449,8 @@ app.MapGet("/pages/{slug}", async (
     }
 
     var canonicalUrl = CanonicalUrlBuilder.Build(GetSiteBaseUrl(request), "/pages/" + page.Slug);
+    if (ApplyConditionalHeaders(request, $"page-html:{page.Id}:{page.Revision}", page.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
     var html = BuildPublicPageHtml(page, canonicalUrl, await renderer.RenderBodyAsync(page));
     return Results.Content(html, "text/html; charset=utf-8");
 });
@@ -401,10 +463,11 @@ app.MapGet("/pages/{slug}.md", async (
 {
     var page = await new PublicPageQueryService(pageStore)
         .FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
-    return page is null
-        ? Results.NotFound()
-        : Results.Text(AgentSnapshotGenerator.GenerateMarkdown(
-            await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "text/markdown; charset=utf-8");
+    if (page is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, $"page-markdown:{page.Id}:{page.Revision}", page.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Text(AgentSnapshotGenerator.GenerateMarkdown(
+        await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "text/markdown; charset=utf-8");
 });
 
 app.MapGet("/api/public/pages/{slug}.json", async (
@@ -415,10 +478,11 @@ app.MapGet("/api/public/pages/{slug}.json", async (
 {
     var page = await new PublicPageQueryService(pageStore)
         .FindPublishedBySlugAsync(GetDefaultSiteId(), slug);
-    return page is null
-        ? Results.NotFound()
-        : Results.Text(AgentSnapshotGenerator.GenerateJson(
-            await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "application/json; charset=utf-8");
+    if (page is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, $"page-json:{page.Id}:{page.Revision}", page.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Text(AgentSnapshotGenerator.GenerateJson(
+        await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "application/json; charset=utf-8");
 });
 
 app.MapGet("/api/public/content/sample/metadata", (HttpRequest request) =>
@@ -440,59 +504,98 @@ app.MapGet("/api/public/datasets", () => GetSampleDataSets().Select(dataSet => n
     dataSet.Name,
     dataSet.Description)));
 
-app.MapGet("/api/public/datasets/{code}", async (string code) =>
+app.MapGet("/api/public/datasets/{code}", async (string code, HttpRequest request, SampleDataContext sample) =>
 {
-    var sample = await BuildSampleDataContextAsync();
+    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
+    var detail = await query.FindByCodeAsync(sample.SiteId, code);
+    if (detail is null) return Results.NotFound();
+    var updatedAt = detail.Records.Count == 0 ? DateTimeOffset.UnixEpoch : detail.Records.Max(record => record.UpdatedAt);
+    var version = "dataset:" + detail.Code + ":" + string.Join(':', detail.Records.Select(record => record.Checksum));
+    if (ApplyConditionalHeaders(request, version, updatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Ok(detail);
+});
+
+app.MapGet("/api/public/datasets/{code}/records", async (
+    string code,
+    HttpRequest request,
+    SampleDataContext sample,
+    int offset = 0,
+    int limit = 50) =>
+{
+    if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
     var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
     var detail = await query.FindByCodeAsync(sample.SiteId, code);
 
-    return detail is null ? Results.NotFound() : Results.Ok(detail);
+    if (detail is null) return Results.NotFound();
+    var records = detail.Records.Skip(offset).Take(limit + 1).ToArray();
+    var pageItems = records.Take(limit).ToArray();
+    var updatedAt = pageItems.Length == 0 ? DateTimeOffset.UnixEpoch : pageItems.Max(record => record.UpdatedAt);
+    var version = $"dataset-records:{code}:{offset}:{limit}:" + string.Join(':', pageItems.Select(record => record.Checksum));
+    if (ApplyConditionalHeaders(request, version, updatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Ok(new PublicPage<PublicDataRecord>(pageItems, offset, limit, records.Length > limit));
 });
 
-app.MapGet("/api/public/datasets/{code}/records", async (string code) =>
+app.MapGet("/api/public/datasets/{code}/schema", async (
+    string code,
+    HttpRequest request,
+    SampleDataContext sample) =>
 {
-    var sample = await BuildSampleDataContextAsync();
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var detail = await query.FindByCodeAsync(sample.SiteId, code);
-
-    return detail is null ? Results.NotFound() : Results.Ok(detail.Records);
-});
-
-app.MapGet("/api/public/datasets/{code}/schema", async (string code) =>
-{
-    var sample = await BuildSampleDataContextAsync();
     var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
     var schema = await query.FindSchemaByCodeAsync(sample.SiteId, code);
 
-    return schema is null ? Results.NotFound() : Results.Ok(schema);
+    if (schema is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, $"dataset-schema:{schema.DataSetCode}:{schema.Checksum}", schema.CreatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Ok(schema);
 });
 
-app.MapGet("/api/public/datasets/{code}/records/{recordKey}", async (string code, string recordKey) =>
+app.MapGet("/api/public/datasets/{code}/records/{recordKey}", async (
+    string code,
+    string recordKey,
+    HttpRequest request,
+    SampleDataContext sample) =>
 {
-    var sample = await BuildSampleDataContextAsync();
     var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
     var record = await query.FindRecordByKeyAsync(sample.SiteId, code, recordKey);
 
-    return record is null ? Results.NotFound() : Results.Ok(record);
+    if (record is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, $"dataset-record:{code}:{record.RecordKey}:{record.Checksum}", record.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Ok(record);
 });
 
-app.MapGet("/api/public/datasets/{code}/export.csv", async (string code) =>
+app.MapGet("/api/public/datasets/{code}/export.csv", async (
+    string code,
+    HttpRequest request,
+    SampleDataContext sample) =>
 {
-    var sample = await BuildSampleDataContextAsync();
     var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
     var detail = await query.FindByCodeAsync(sample.SiteId, code);
 
-    return detail is null
-        ? Results.NotFound()
-        : Results.Text(CsvDataExporter.Export(detail.Records), "text/csv");
+    if (detail is null) return Results.NotFound();
+    var updatedAt = detail.Records.Count == 0 ? DateTimeOffset.UnixEpoch : detail.Records.Max(record => record.UpdatedAt);
+    var version = "dataset-csv:" + detail.Code + ":" + string.Join(':', detail.Records.Select(record => record.Checksum));
+    if (ApplyConditionalHeaders(request, version, updatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    return Results.Text(CsvDataExporter.Export(detail.Records), "text/csv");
 });
 
-app.MapGet("/api/public/search", async (string q, IContentItemStore contentStore) =>
+app.MapGet("/api/public/search", async (
+    string q,
+    ISearchIndex index,
+    int offset = 0,
+    int limit = 20) =>
 {
-    var index = await BuildSampleSearchIndexAsync(contentStore);
-    var results = await index.SearchAsync(new SearchQuery(q));
+    if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
+    if (string.IsNullOrWhiteSpace(q) || q.Length > 200)
+    {
+        return Results.BadRequest(new { Error = "q must contain between 1 and 200 characters." });
+    }
+    var results = await index.SearchAsync(new SearchQuery(q, Limit: limit + 1, Offset: offset));
 
-    return results.Select(result => new
+    var items = results.Take(limit).Select(result => new
     {
         result.Document.TargetType,
         result.Document.TargetId,
@@ -501,12 +604,12 @@ app.MapGet("/api/public/search", async (string q, IContentItemStore contentStore
         result.Document.Url,
         result.Score,
         result.MatchedFields
-    });
+    }).ToArray();
+    return Results.Ok(new PublicPage<object>(items, offset, limit, results.Count > limit));
 });
 
-app.MapGet("/api/public/search/health", async (IContentItemStore contentStore) =>
+app.MapGet("/api/public/search/health", async (ISearchIndex index) =>
 {
-    var index = await BuildSampleSearchIndexAsync(contentStore);
     var results = await index.SearchAsync(new SearchQuery("sample"));
 
     return new
@@ -536,6 +639,44 @@ static bool IsPublicOutputRequest(HttpRequest request)
         request.Path.Equals("/llms-full.txt", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/.well-known/agent.json", StringComparison.OrdinalIgnoreCase) ||
         request.Path.Equals("/api/openapi.json", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool TryValidatePage(int offset, int limit, out IResult error)
+{
+    if (offset < 0 || limit is < 1 or > 100)
+    {
+        error = Results.BadRequest(new { Error = "offset must be non-negative and limit must be between 1 and 100." });
+        return false;
+    }
+
+    error = Results.Empty;
+    return true;
+}
+
+static bool ApplyConditionalHeaders(HttpRequest request, string resourceVersion, DateTimeOffset updatedAt)
+{
+    var normalizedUpdatedAt = DateTimeOffset.FromUnixTimeSeconds(updatedAt.ToUnixTimeSeconds());
+    var versionBytes = System.Text.Encoding.UTF8.GetBytes(
+        resourceVersion + ":" + normalizedUpdatedAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+    var entityTag = '"' + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(versionBytes)).ToLowerInvariant() + '"';
+    request.HttpContext.Response.Headers.ETag = entityTag;
+    request.HttpContext.Response.Headers.LastModified = normalizedUpdatedAt.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
+    var ifNoneMatch = request.Headers.IfNoneMatch.ToString();
+    if (!string.IsNullOrWhiteSpace(ifNoneMatch))
+    {
+        return ifNoneMatch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(candidate => candidate == "*" ||
+                string.Equals(candidate.StartsWith("W/", StringComparison.OrdinalIgnoreCase) ? candidate[2..] : candidate,
+                    entityTag, StringComparison.Ordinal));
+    }
+
+    return DateTimeOffset.TryParse(
+            request.Headers.IfModifiedSince.ToString(),
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal,
+            out var ifModifiedSince) &&
+        normalizedUpdatedAt <= ifModifiedSince.ToUniversalTime();
 }
 
 static async Task<AnalyticsEvent> StoreAnalyticsEventAsync(
@@ -954,19 +1095,17 @@ static async Task<IReadOnlyList<AgentContentDocument>> GetAgentContentDocumentsA
     Uri siteBaseUrl,
     IContentItemStore contentStore,
     IPageStore? pageStore = null,
-    ServerRenderedBlockPageRenderer? pageRenderer = null)
+    ServerRenderedBlockPageRenderer? pageRenderer = null,
+    ContentListQuery? query = null)
 {
-    var query = new PublicContentQueryService(contentStore);
-    var summaries = await query.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
+    var contentQuery = new PublicContentQueryService(contentStore);
+    var details = await contentQuery.ListPublishedDetailsAsync(
+        query ?? new ContentListQuery(SiteId: GetDefaultSiteId()));
     var documents = new List<AgentContentDocument>();
 
-    foreach (var summary in summaries)
+    foreach (var detail in details)
     {
-        var detail = await query.FindPublishedBySlugAsync(summary.SiteId, summary.Slug);
-        if (detail is not null)
-        {
-            documents.Add(BuildAgentContentDocument(detail, siteBaseUrl));
-        }
+        documents.Add(BuildAgentContentDocument(detail, siteBaseUrl));
     }
 
     if (pageStore is not null && pageRenderer is not null)
@@ -1209,7 +1348,9 @@ static async Task<SampleDataContext> BuildSampleDataContextAsync()
     return new SampleDataContext(dataSet.SiteId, dataSetStore, recordStore);
 }
 
-static async Task<ISearchIndex> BuildSampleSearchIndexAsync(IContentItemStore contentStore)
+static async Task<ISearchIndex> BuildSampleSearchIndexAsync(
+    IContentItemStore contentStore,
+    SampleDataContext sample)
 {
     var index = new InMemorySearchIndex();
     var siteBase = new Uri("https://example.test");
@@ -1237,7 +1378,6 @@ static async Task<ISearchIndex> BuildSampleSearchIndexAsync(IContentItemStore co
             MetadataJson: null));
     }
 
-    var sample = await BuildSampleDataContextAsync();
     var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
     var dataSet = await query.FindByCodeAsync(sample.SiteId, "sample-catalog");
 
@@ -1279,6 +1419,32 @@ public sealed record AnalyticsEventCaptureRequest(
     string? UserAgent = null,
     string? IpAddress = null,
     IReadOnlyDictionary<string, string>? Metadata = null);
+
+public sealed record PublicPage<T>(
+    IReadOnlyList<T> Items,
+    int Offset,
+    int Limit,
+    bool HasMore);
+
+public sealed class PublicResponseCacheOptions
+{
+    public const string SectionName = "OpenPortalKit:PublicCaching";
+    public bool Enabled { get; init; } = true;
+    public int BrowserMaxAgeSeconds { get; init; } = 60;
+    public int SharedMaxAgeSeconds { get; init; } = 300;
+    public int StaleWhileRevalidateSeconds { get; init; } = 30;
+
+    public void Validate()
+    {
+        if (BrowserMaxAgeSeconds is < 0 or > 86400 ||
+            SharedMaxAgeSeconds is < 0 or > 604800 ||
+            StaleWhileRevalidateSeconds is < 0 or > 86400)
+        {
+            throw new InvalidOperationException(
+                "Public caching durations are outside their supported bounds.");
+        }
+    }
+}
 
 public sealed class ApiAnalyticsCaptureQueue : BackgroundService
 {
