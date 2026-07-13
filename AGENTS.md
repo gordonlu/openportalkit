@@ -10,7 +10,7 @@ Follow these rules when implementing OpenPortalKit.
 - Public-output-changing actions must be audited.
 - Structured data must preserve source, import batch, as-of date, schema version, checksum, and timestamps.
 - Public content should consider HTML, Markdown, JSON, sitemap, RSS, search, and AgentSEO readiness.
-- Finance-specific concepts belong only in `industry-packs/Finance`.
+- Industry-specific concepts belong only in their matching directory under `industry-packs/`; finance concepts remain in `industry-packs/Finance`.
 
 ## Definition of Done
 

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-dashboard-cards.v1",
+  "cards": [
+    { "code": "release-catalog-freshness", "title": "Release Catalog Freshness", "metric": "dataset.release_catalog.freshness", "warningAfterHours": 48 },
+    { "code": "upcoming-events", "title": "Upcoming Events", "metric": "dataset.event_calendar.upcoming" },
+    { "code": "unapproved-media-assets", "title": "Unapproved Media Assets", "metric": "assets.entertainment.unapproved", "alertWhenAbove": 0 }
+  ]
+}

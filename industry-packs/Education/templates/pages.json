@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-templates.v1",
+  "templates": [
+    { "code": "education-homepage", "name": "Education Homepage", "blocks": ["hero", "content-list", "activity-list", "link-list"] },
+    { "code": "program-catalog", "name": "Program Catalog", "blocks": ["hero", "data-table", "faq", "contact"] },
+    { "code": "research-portal", "name": "Research Portal", "blocks": ["hero", "report-list", "download-list", "rich-text"] }
+  ]
+}

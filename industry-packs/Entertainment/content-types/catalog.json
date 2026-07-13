@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "opk.pack-content-types.v1",
+  "contentTypes": [
+    { "code": "title-profile", "name": "Title Profile", "requiredFields": ["title", "summary", "synopsis", "releaseDate", "ageRating"] },
+    { "code": "release-announcement", "name": "Release Announcement", "requiredFields": ["title", "summary", "body", "releaseDate", "territories"] },
+    { "code": "event-listing", "name": "Event Listing", "requiredFields": ["title", "summary", "venue", "startsAt", "officialUrl"] },
+    { "code": "talent-profile", "name": "Talent Profile", "requiredFields": ["title", "summary", "biography", "approvedCredits"] },
+    { "code": "editorial-feature", "name": "Editorial Feature", "requiredFields": ["title", "summary", "body", "author"] }
+  ]
+}

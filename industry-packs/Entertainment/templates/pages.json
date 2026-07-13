@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-templates.v1",
+  "templates": [
+    { "code": "entertainment-homepage", "name": "Entertainment Homepage", "blocks": ["hero", "content-list", "activity-list", "link-list"] },
+    { "code": "release-center", "name": "Release Center", "blocks": ["hero", "announcement-list", "data-table", "download-list"] },
+    { "code": "event-portal", "name": "Event Portal", "blocks": ["hero", "activity-list", "faq", "contact"] }
+  ]
+}

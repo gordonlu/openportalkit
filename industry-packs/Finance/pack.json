@@ -11,5 +11,13 @@
     "templates": true,
     "dashboardCards": true,
     "seedData": true
+  },
+  "resources": {
+    "contentTypes": ["content-types/catalog.json"],
+    "datasets": ["datasets/catalog.json"],
+    "rules": ["rules/publishing.json"],
+    "templates": ["templates/pages.json"],
+    "dashboardCards": ["dashboard-cards/cards.json"],
+    "seedData": ["seed-data/sample.json"]
   }
 }

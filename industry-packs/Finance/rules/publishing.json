@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-rules.v1",
+  "rules": [
+    { "code": "finance-disclaimer-required", "appliesTo": ["market-commentary", "disclosure-announcement"], "condition": "field:disclaimer:not-empty", "severity": "block" },
+    { "code": "finance-source-required", "appliesTo": ["market-commentary", "research-article"], "condition": "field:source:not-empty", "severity": "block" },
+    { "code": "finance-review-required", "appliesTo": ["*"], "condition": "workflow:approved", "severity": "block" }
+  ]
+}

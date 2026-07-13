@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "opk.pack-content-types.v1",
+  "contentTypes": [
+    { "code": "program-profile", "name": "Program Profile", "requiredFields": ["title", "summary", "body", "credential", "duration"] },
+    { "code": "course-description", "name": "Course Description", "requiredFields": ["title", "summary", "courseCode", "credits", "learningOutcomes"] },
+    { "code": "faculty-profile", "name": "Faculty Profile", "requiredFields": ["title", "summary", "department", "biography"] },
+    { "code": "research-highlight", "name": "Research Highlight", "requiredFields": ["title", "summary", "body", "source", "publishedAt"] },
+    { "code": "admissions-notice", "name": "Admissions Notice", "requiredFields": ["title", "summary", "body", "effectiveDate", "contact"] }
+  ]
+}

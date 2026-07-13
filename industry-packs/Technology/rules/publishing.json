@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-rules.v1",
+  "rules": [
+    { "code": "security-review-required", "appliesTo": ["security-advisory"], "condition": "workflow:approved", "severity": "block" },
+    { "code": "release-version-required", "appliesTo": ["product-update", "developer-guide"], "condition": "field:releaseVersion-or-productVersion:not-empty", "severity": "block" },
+    { "code": "affected-versions-required", "appliesTo": ["security-advisory"], "condition": "field:affectedVersions:not-empty", "severity": "block" }
+  ]
+}

@@ -65,7 +65,7 @@
 
                 <form method="post" asp-page-handler="CreatePage" class="opk-panel opk-template-form">
                     <div class="opk-panel-header"><div><h2>Create Page</h2><p>Fixes the selected template version and block snapshot.</p></div></div>
-                    <label>Template<select asp-for="NewPage.TemplateCode"><option value="">Select template</option>@foreach (var template in Model.Templates.Where(template => template.Status == OpenPortalKit.Modules.Content.BlockTemplates.PageTemplateStatus.Published)){<option value="@template.Code">@template.Name (v@template.Version)</option>}</select></label>
+                    <label>Template<select asp-for="NewPage.TemplateCode"><option value="">Select template</option>@foreach (var template in Model.Templates.Where(template => template.Status == OpenPortalKit.Modules.Content.BlockTemplates.PageTemplateStatus.Published)){<option value="@template.Code">@template.Name (v@(template.Version))</option>}</select></label>
                     <label>Title<input asp-for="NewPage.Title" /></label>
                     <label>Slug<input asp-for="NewPage.Slug" placeholder="public-page" /></label>
                     <label>Summary<textarea asp-for="NewPage.Summary" rows="3"></textarea></label>

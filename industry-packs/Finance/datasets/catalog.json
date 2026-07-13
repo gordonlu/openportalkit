@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.pack-datasets.v1",
+  "datasets": [
+    { "code": "fund_nav", "name": "Fund NAV", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["productCode", "nav", "currency"], "properties": { "productCode": { "type": "string" }, "nav": { "type": "number" }, "currency": { "type": "string" } } } },
+    { "code": "market_calendar", "name": "Market Calendar", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["market", "date", "status"], "properties": { "market": { "type": "string" }, "date": { "type": "string", "format": "date" }, "status": { "type": "string" } } } }
+  ]
+}

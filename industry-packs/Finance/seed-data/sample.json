@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-seed.v1",
+  "source": "OpenPortalKit Finance Pack sample",
+  "asOfDate": "2026-07-13",
+  "records": [
+    { "dataset": "market_calendar", "recordKey": "sample-market-2026-07-13", "payload": { "market": "Sample Market", "date": "2026-07-13", "status": "open" } }
+  ]
+}

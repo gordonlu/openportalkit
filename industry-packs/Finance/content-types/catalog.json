@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "opk.pack-content-types.v1",
+  "contentTypes": [
+    { "code": "market-commentary", "name": "Market Commentary", "requiredFields": ["title", "summary", "body", "source", "disclaimer"] },
+    { "code": "disclosure-announcement", "name": "Disclosure Announcement", "requiredFields": ["title", "summary", "body", "source", "effectiveDate", "disclaimer"] },
+    { "code": "investor-education", "name": "Investor Education", "requiredFields": ["title", "summary", "body", "reviewedBy"] },
+    { "code": "research-article", "name": "Research Article", "requiredFields": ["title", "summary", "body", "source", "asOfDate"] }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "schemaVersion": "opk.pack-seed.v1", "source": "OpenPortalKit Education Pack sample", "asOfDate": "2026-07-13",
+  "records": [{ "dataset": "academic_calendar", "recordKey": "sample-term-orientation", "payload": { "term": "Sample Term", "event": "Orientation", "startsOn": "2026-09-01" } }]
+}

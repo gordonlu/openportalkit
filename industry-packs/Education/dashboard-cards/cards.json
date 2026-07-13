@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-dashboard-cards.v1",
+  "cards": [
+    { "code": "program-catalog-freshness", "title": "Program Catalog Freshness", "metric": "dataset.program_catalog.freshness", "warningAfterHours": 168 },
+    { "code": "admissions-review-queue", "title": "Admissions Review Queue", "metric": "workflow.admissions_notice.pending" },
+    { "code": "missing-course-outcomes", "title": "Missing Learning Outcomes", "metric": "content.course_description.missing_outcomes", "alertWhenAbove": 0 }
+  ]
+}

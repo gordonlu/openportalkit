@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-templates.v1",
+  "templates": [
+    { "code": "technology-homepage", "name": "Technology Homepage", "blocks": ["hero", "content-list", "link-list", "download-list"] },
+    { "code": "release-center", "name": "Release Center", "blocks": ["hero", "announcement-list", "data-table", "faq"] },
+    { "code": "developer-portal", "name": "Developer Portal", "blocks": ["hero", "rich-text", "link-list", "report-list"] }
+  ]
+}

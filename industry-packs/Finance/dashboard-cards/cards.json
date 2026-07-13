@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-dashboard-cards.v1",
+  "cards": [
+    { "code": "fund-nav-freshness", "title": "Fund NAV Freshness", "metric": "dataset.fund_nav.freshness", "warningAfterHours": 24 },
+    { "code": "missing-disclaimers", "title": "Missing Disclaimers", "metric": "content.finance.missing_disclaimer", "alertWhenAbove": 0 },
+    { "code": "disclosure-review-queue", "title": "Disclosure Review Queue", "metric": "workflow.disclosure.pending" }
+  ]
+}

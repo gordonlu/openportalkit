@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-rules.v1",
+  "rules": [
+    { "code": "rights-approved-assets", "appliesTo": ["title-profile", "talent-profile"], "condition": "assets:usage-approved", "severity": "block" },
+    { "code": "age-rating-required", "appliesTo": ["title-profile"], "condition": "field:ageRating:not-empty", "severity": "block" },
+    { "code": "event-official-url", "appliesTo": ["event-listing"], "condition": "field:officialUrl:valid-url", "severity": "block" }
+  ]
+}

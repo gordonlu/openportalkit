@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.pack-datasets.v1",
+  "datasets": [
+    { "code": "release_catalog", "name": "Release Catalog", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["titleCode", "name", "releaseDate", "territory"], "properties": { "titleCode": { "type": "string" }, "name": { "type": "string" }, "releaseDate": { "type": "string", "format": "date" }, "territory": { "type": "string" } } } },
+    { "code": "event_calendar", "name": "Event Calendar", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["eventCode", "name", "startsAt", "venue"], "properties": { "eventCode": { "type": "string" }, "name": { "type": "string" }, "startsAt": { "type": "string", "format": "date-time" }, "venue": { "type": "string" } } } }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-dashboard-cards.v1",
+  "cards": [
+    { "code": "release-catalog-freshness", "title": "Release Catalog Freshness", "metric": "dataset.release_catalog.freshness", "warningAfterHours": 48 },
+    { "code": "security-advisory-review", "title": "Security Advisory Review", "metric": "workflow.security_advisory.pending" },
+    { "code": "stale-developer-guides", "title": "Stale Developer Guides", "metric": "content.developer_guide.stale" }
+  ]
+}

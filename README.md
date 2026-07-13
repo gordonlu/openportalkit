@@ -30,7 +30,9 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs
-- Finance Pack placeholder under `industry-packs/Finance`
+- R10 reference pack portfolio for Finance, Technology, Education, and Entertainment under `industry-packs/`
+- R10 industry pack manifest loader with fail-closed validation, resource checksums, and the `/IndustryPacks` admin catalog
+- R10 audited, checksummed pack enablement state in `db/postgresql/migrations/0013_industry_pack_installations.sql`
 - Architecture guardrail documents from R0
 - Boundary check script for forbidden core terminology
 
@@ -102,9 +104,10 @@ The admin host exposes:
 R7 dashboard and analytics notes are in `docs/r7-dashboard-analytics.md`.
 R8 Agent Access and AgentSEO notes are in `docs/r8-agent-access.md`.
 R9 Block Template System notes are in `docs/r9-block-template-system.md`.
+R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
 
 ## Product Boundary
 
 OpenPortalKit is a publishing framework, not a CRM, BI platform, trading system, low-code builder, or general data warehouse.
 
-Core code must remain industry-neutral. Finance-specific content types, datasets, validation rules, dashboard cards, and templates belong only in `industry-packs/Finance`.
+Core code must remain industry-neutral. Pack-specific content types, datasets, validation rules, dashboard cards, and templates belong only in their matching directory under `industry-packs/`.

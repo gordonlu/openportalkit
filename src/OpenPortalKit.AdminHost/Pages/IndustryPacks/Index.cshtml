@@ -1,0 +1,70 @@
+@page
+@model OpenPortalKit.AdminHost.Pages.IndustryPacks.IndexModel
+@using OpenPortalKit.Modules.IndustryPacks
+@{
+    ViewData["Title"] = "Industry Packs";
+}
+
+<section class="opk-admin-shell">
+    <aside class="opk-sidebar" aria-label="Admin navigation">
+        <a class="opk-brand" asp-page="/Index"><span class="opk-brand-mark">OP</span><span><strong>OpenPortalKit</strong><small>Admin</small></span></a>
+        <nav class="opk-nav">
+            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
+            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
+            <a class="opk-nav-link" asp-page="/Templates/Index"><span class="opk-nav-icon"></span>Templates</a>
+            <a class="opk-nav-link is-active" asp-page="/IndustryPacks/Index"><span class="opk-nav-icon"></span>Industry Packs</a>
+            <a class="opk-nav-link" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
+        </nav>
+        <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>@Model.Packs.Count validated packs</span></div>
+    </aside>
+
+    <div class="opk-workspace">
+        <header class="opk-topbar"><div><h1>Industry Packs</h1><p>Validated, independently optional definitions for vertical publishing.</p></div></header>
+        <section class="opk-pack-summary" aria-label="Industry pack summary">
+            <div><strong>@Model.Packs.Count</strong><span>Available packs</span></div>
+            <div><strong>@Model.Packs.Sum(item => item.Pack.Resources.Count)</strong><span>Validated resources</span></div>
+            <div><strong>@Model.Packs.Count(item => item.IsEnabled)</strong><span>Enabled packs</span></div>
+        </section>
+
+        @if (!ViewContext.ModelState.IsValid)
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>
+        }
+
+        @if (Model.SelectedPlan is not null)
+        {
+            <section class="opk-panel opk-pack-impact">
+                <div class="opk-panel-header"><div><h2>@Model.SelectedPlan.PackName impact</h2><p>@Model.SelectedPlan.ChangedResourceCount changes · manifest @(Model.SelectedPlan.ManifestChanged ? "changed" : "unchanged")</p></div></div>
+                <div class="opk-pack-change-list">@foreach (var change in Model.SelectedPlan.Changes){<div><span class="opk-chip @(change.ChangeType == IndustryPackResourceChangeType.Unchanged ? "is-draft" : "is-approved")">@change.ChangeType</span><strong>@change.Kind</strong><code>@change.ResourcePath</code></div>}</div>
+            </section>
+        }
+
+        <section class="opk-pack-list">
+        @foreach (var item in Model.Packs)
+        {
+            var pack = item.Pack;
+            <article class="opk-panel opk-pack-row">
+                <header><div><span class="opk-pack-monogram">@pack.Manifest.Name[..2].ToUpperInvariant()</span><div><h2>@pack.Manifest.DisplayName</h2><p>@pack.Manifest.Description</p></div></div><span class="opk-chip @(item.IsEnabled ? "is-approved" : "is-draft")">@(item.IsEnabled ? "Enabled" : "Available")</span></header>
+                <dl><div><dt>Version</dt><dd>@pack.Manifest.Version</dd></div><div><dt>Requires core</dt><dd>@pack.Manifest.RequiresCore</dd></div><div><dt>Resources</dt><dd>@pack.Resources.Count</dd></div><div><dt>Manifest</dt><dd title="@pack.ManifestChecksum">@pack.ManifestChecksum[..12]</dd></div></dl>
+                <div class="opk-pack-capabilities">
+                @foreach (var group in pack.Resources.GroupBy(resource => resource.Kind).OrderBy(group => group.Key.ToString()))
+                {
+                    <span><strong>@group.Count()</strong> @group.Key</span>
+                }
+                </div>
+                <div class="opk-pack-actions">
+                    <form method="post" asp-page-handler="Plan"><input type="hidden" name="PackName" value="@pack.Manifest.Name" /><button class="opk-button opk-button-secondary" type="submit">Dry run</button></form>
+                    @if (item.IsEnabled)
+                    {
+                        <form method="post" asp-page-handler="Disable"><input type="hidden" name="PackName" value="@pack.Manifest.Name" /><button class="opk-button opk-button-secondary" type="submit">Disable</button></form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="Enable"><input type="hidden" name="PackName" value="@pack.Manifest.Name" /><button class="opk-button opk-button-primary" type="submit">Enable</button></form>
+                    }
+                </div>
+            </article>
+        }
+        </section>
+    </div>
+</section>

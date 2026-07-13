@@ -82,4 +82,11 @@ public sealed class PageTemplateService
 
         return new PageTemplateSaveResult(true, normalized, Array.Empty<string>());
     }
+
+    public Task<PageTemplate?> FindByCodeAsync(
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        return _store.FindByCodeAsync(SlugGenerator.Generate(code), cancellationToken);
+    }
 }

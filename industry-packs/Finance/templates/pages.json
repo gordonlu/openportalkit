@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-templates.v1",
+  "templates": [
+    { "code": "finance-homepage", "name": "Finance Homepage", "blocks": ["hero", "announcement-list", "data-table", "report-list", "faq"] },
+    { "code": "disclosure-center", "name": "Disclosure Center", "blocks": ["hero", "announcement-list", "download-list", "contact"] },
+    { "code": "fund-data-page", "name": "Fund Data Page", "blocks": ["hero", "data-table", "chart", "rich-text"] }
+  ]
+}

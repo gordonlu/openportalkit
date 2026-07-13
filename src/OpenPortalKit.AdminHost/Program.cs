@@ -6,6 +6,7 @@ using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
 using OpenPortalKit.AdminHost;
 using OpenPortalKit.AdminHost.AgentAccess;
+using OpenPortalKit.AdminHost.IndustryPacks;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Assets;
@@ -22,6 +23,7 @@ using OpenPortalKit.Modules.Dashboard.Summaries;
 using OpenPortalKit.Modules.Data;
 using OpenPortalKit.Modules.Data.Datasets;
 using OpenPortalKit.Modules.Identity;
+using OpenPortalKit.Modules.IndustryPacks;
 using OpenPortalKit.Modules.Jobs;
 using OpenPortalKit.Modules.Search;
 using OpenPortalKit.Modules.Seo;
@@ -32,8 +34,21 @@ using Microsoft.Extensions.Options;
 var builder = WebApplication.CreateBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
 
+var industryPackRoot = Path.GetFullPath(Path.Combine(
+    builder.Environment.ContentRootPath,
+    builder.Configuration["OpenPortalKit:IndustryPacks:RootPath"] ?? "../../industry-packs"));
+var industryPackCatalog = new IndustryPackCatalog(new IndustryPackLoader(
+    builder.Configuration["OpenPortalKit:IndustryPacks:CoreVersion"] ?? "0.1.0"));
+var industryPackCatalogResult = industryPackCatalog.DiscoverAsync(industryPackRoot).GetAwaiter().GetResult();
+if (!industryPackCatalogResult.Succeeded)
+{
+    throw new InvalidOperationException("Industry pack validation failed: " + string.Join("; ",
+        industryPackCatalogResult.Errors.Select(error => $"{error.Code}: {error.Message}")));
+}
+
 // Add services to the container.
 builder.Services.AddRazorPages();
+builder.Services.AddSingleton(industryPackCatalogResult);
 builder.Services.AddHealthChecks();
 builder.Services.Configure<OpenPortalKitStorageOptions>(
     builder.Configuration.GetSection(OpenPortalKitStorageOptions.SectionName));
@@ -101,6 +116,7 @@ if (persistencePostgres.Enabled)
     builder.Services.AddSingleton<IIdempotencyStore, PostgresIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, PostgresAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, PostgresPublicOutputRevalidationStore>();
+    builder.Services.AddSingleton<IIndustryPackInstallationStore, PostgresIndustryPackInstallationStore>();
 }
 else
 {
@@ -108,6 +124,7 @@ else
     builder.Services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, InMemoryPublicOutputRevalidationStore>();
+    builder.Services.AddSingleton<IIndustryPackInstallationStore, InMemoryIndustryPackInstallationStore>();
 }
 
 builder.Services.AddSingleton<AuditRecorder>();
@@ -132,6 +149,19 @@ else
 }
 
 builder.Services.AddSingleton<PortalPageService>();
+builder.Services.AddSingleton<IndustryPackRuntimeRegistry>();
+foreach (var resourceKind in Enum.GetValues<IndustryPackResourceKind>())
+{
+    builder.Services.AddSingleton<IIndustryPackResourceRegistrationTarget>(provider =>
+        new AdminIndustryPackRegistrationTarget(
+            resourceKind,
+            provider.GetRequiredService<IndustryPackRuntimeRegistry>(),
+            provider.GetRequiredService<IBlockDefinitionCatalog>(),
+            provider.GetRequiredService<PageTemplateService>(),
+            provider.GetRequiredService<IDataSetStore>()));
+}
+builder.Services.AddSingleton<IndustryPackInstallationService>();
+builder.Services.AddHostedService<IndustryPackRehydrationHostedService>();
 builder.Services.AddSingleton<IPageBlockDataResolver, AdminPageBlockDataResolver>();
 builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
 if (agentOutputPostgres.Enabled)
@@ -174,6 +204,7 @@ builder.Services.AddSingleton<IDashboardSignalSource>(provider =>
         provider.GetRequiredService<IDataRecordStore>(),
         eventStore: provider.GetRequiredService<IAnalyticsEventStore>()));
 builder.Services.AddSingleton<IDashboardSignalSource, AgentReadinessDashboardSignalSource>();
+builder.Services.AddSingleton<IDashboardSignalSource, IndustryPackDashboardSignalSource>();
 builder.Services.AddSingleton<IDashboardSignalSource, SystemRuntimeDashboardSignalSource>();
 builder.Services.AddSingleton<IDashboardSignalSource, OutboxDashboardSignalSource>();
 foreach (var probe in CreateDefaultHealthProbes(builder.Configuration))
@@ -209,6 +240,7 @@ app.MapHealthChecks("/health");
 app.MapGet("/admin/system/modules", () => new[]
 {
     IdentityModule.Descriptor,
+    IndustryPacksModule.Descriptor,
     ContentModule.Descriptor,
     AssetsModule.Descriptor,
     WorkflowModule.Descriptor,

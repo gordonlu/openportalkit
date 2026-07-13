@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.pack-rules.v1",
+  "rules": [
+    { "code": "program-owner-review", "appliesTo": ["program-profile", "course-description"], "condition": "workflow:approved", "severity": "block" },
+    { "code": "admissions-effective-date", "appliesTo": ["admissions-notice"], "condition": "field:effectiveDate:not-empty", "severity": "block" },
+    { "code": "research-source-required", "appliesTo": ["research-highlight"], "condition": "field:source:not-empty", "severity": "block" }
+  ]
+}

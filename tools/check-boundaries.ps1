@@ -14,7 +14,8 @@ $corePaths = @(
     "src/OpenPortalKit.Modules.AgentAccess",
     "src/OpenPortalKit.Modules.Dashboard",
     "src/OpenPortalKit.Modules.Audit",
-    "src/OpenPortalKit.Modules.Jobs"
+    "src/OpenPortalKit.Modules.Jobs",
+    "src/OpenPortalKit.Modules.IndustryPacks"
 ) | ForEach-Object {
     Join-Path $Root $_
 }
@@ -23,13 +24,18 @@ $forbidden = @(
     "Fund",
     "IPO",
     "Stock",
-    "Security",
+    "FinancialSecurity",
+    "SecuritySnapshot",
     "Broker",
     "Finance",
     "MarketCommentary",
     "RiskDisclosure",
     "FundNav",
-    "IpoProject"
+    "IpoProject",
+    "Course"
+    "Student"
+    "Talent"
+    "Streaming"
 )
 
 $files = foreach ($path in $corePaths) {

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.pack-datasets.v1",
+  "datasets": [
+    { "code": "release_catalog", "name": "Release Catalog", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["product", "version", "releasedAt", "supportStatus"], "properties": { "product": { "type": "string" }, "version": { "type": "string" }, "releasedAt": { "type": "string", "format": "date-time" }, "supportStatus": { "type": "string" } } } },
+    { "code": "compatibility_matrix", "name": "Compatibility Matrix", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["component", "version", "compatibleWith"], "properties": { "component": { "type": "string" }, "version": { "type": "string" }, "compatibleWith": { "type": "array" } } } }
+  ]
+}

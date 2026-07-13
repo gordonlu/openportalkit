@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.pack-datasets.v1",
+  "datasets": [
+    { "code": "program_catalog", "name": "Program Catalog", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["programCode", "name", "credential", "status"], "properties": { "programCode": { "type": "string" }, "name": { "type": "string" }, "credential": { "type": "string" }, "status": { "type": "string" } } } },
+    { "code": "academic_calendar", "name": "Academic Calendar", "requiredTraceability": ["source", "importBatch", "asOfDate", "schemaVersion", "checksum", "timestamps"], "recordSchema": { "type": "object", "required": ["term", "event", "startsOn"], "properties": { "term": { "type": "string" }, "event": { "type": "string" }, "startsOn": { "type": "string", "format": "date" } } } }
+  ]
+}

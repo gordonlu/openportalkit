@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "opk.pack-content-types.v1",
+  "contentTypes": [
+    { "code": "product-update", "name": "Product Update", "requiredFields": ["title", "summary", "body", "product", "releaseVersion"] },
+    { "code": "engineering-article", "name": "Engineering Article", "requiredFields": ["title", "summary", "body", "author", "reviewedBy"] },
+    { "code": "security-advisory", "name": "Security Advisory", "requiredFields": ["title", "summary", "severity", "affectedVersions", "mitigation"] },
+    { "code": "developer-guide", "name": "Developer Guide", "requiredFields": ["title", "summary", "body", "productVersion"] }
+  ]
+}
