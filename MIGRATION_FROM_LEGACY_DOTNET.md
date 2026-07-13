@@ -2,6 +2,10 @@
 
 OpenPortalKit includes the first production migration-toolkit workflow for legacy ASP.NET MVC, EF6, and other content-heavy systems.
 
+Use `opk import legacy` for a repeatable offline dry run before opening AdminHost. A runnable fixture and exact
+command are provided in `examples/legacy-migration`. The CLI uses the same analyzer as AdminHost, writes the report
+atomically, refuses to overwrite existing evidence, and returns exit code `1` when blocking issues exist.
+
 ## Implemented Analysis and Staging
 
 AdminHost exposes `/Migration` for authenticated operators. It accepts an in-memory UTF-8 CSV up to 5 MB and never writes content during analysis or staging. Required columns are:

@@ -3246,6 +3246,12 @@ rollback plan
 \# R12 — Developer Experience + 1.0 Stabilization
 
 
+\*\*Status: repository implementation complete; 1.0 RC awaits target-environment rehearsal.\*\* R12 provides the
+cross-platform `opk` contract, structural boundary enforcement, repository/live AgentSEO readiness checks, stable
+extension/public contracts, runnable examples, browser coverage, and a release evidence checklist. Windows Server
+and real-provider OIDC rehearsals remain explicit external release gates.
+
+
 
 \## Goal
 
@@ -4492,4 +4498,3 @@ safe for enterprise publishing
 adaptable to regulated industries
 
 ```
-

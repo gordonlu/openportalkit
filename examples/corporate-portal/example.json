@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.example.v1",
+  "route": "/examples/corporate",
+  "template": "corporate-newsroom",
+  "modules": ["Content", "Data", "Search", "Seo", "Dashboard", "Workflow", "Audit"],
+  "industryPack": null,
+  "publicOutputs": ["html", "markdown", "json", "sitemap", "rss", "openapi", "agent"]
+}

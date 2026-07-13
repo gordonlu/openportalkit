@@ -37,5 +37,42 @@ jobs:
         working-directory: apps/web
       - run: npm run build
         working-directory: apps/web
+      - run: npm run test:e2e
+        working-directory: apps/web
+        env:
+          PLAYWRIGHT_CHROME_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
       - shell: pwsh
         run: ./tools/check-boundaries.ps1
+      - shell: pwsh
+        run: ./tools/opk.ps1 check-agent-readiness --format text
+      - shell: pwsh
+        run: ./tools/opk.ps1 industry-pack validate --path ./industry-packs --format text
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: openportalkit
+          POSTGRES_USER: openportalkit
+          POSTGRES_PASSWORD: openportalkit_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openportalkit -d openportalkit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+      - run: dotnet restore tests/OpenPortalKit.PostgreSql.IntegrationTests/OpenPortalKit.PostgreSql.Integration.Tests.csproj
+      - run: dotnet build tests/OpenPortalKit.PostgreSql.IntegrationTests/OpenPortalKit.PostgreSql.Integration.Tests.csproj --no-restore -m:1
+      - run: dotnet run --no-build --project tests/OpenPortalKit.PostgreSql.IntegrationTests/OpenPortalKit.PostgreSql.Integration.Tests.csproj
+        env:
+          OPK_POSTGRES_INTEGRATION: Host=127.0.0.1;Port=5432;Database=openportalkit;Username=openportalkit;Password=openportalkit_ci

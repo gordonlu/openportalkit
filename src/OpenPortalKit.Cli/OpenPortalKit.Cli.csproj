@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenPortalKit.Modules.AgentAccess\OpenPortalKit.Modules.AgentAccess.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.IndustryPacks\OpenPortalKit.Modules.IndustryPacks.csproj" />
+    <ProjectReference Include="..\OpenPortalKit.Modules.Migration\OpenPortalKit.Modules.Migration.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>opk</AssemblyName>
+  </PropertyGroup>
+
+</Project>

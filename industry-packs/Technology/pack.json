@@ -1,4 +1,5 @@
 {
+  "manifestVersion": "1.0",
   "name": "Technology",
   "displayName": "Technology Pack",
   "description": "Optional pack for product, engineering, release, documentation, and developer-community publishing.",

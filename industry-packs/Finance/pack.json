@@ -1,8 +1,9 @@
 {
+  "manifestVersion": "1.0",
   "name": "Finance",
   "displayName": "Finance Pack",
   "description": "Optional industry pack demonstrating regulated, data-heavy, high-trust publishing.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "requiresCore": "0.1.0",
   "registers": {
     "contentTypes": true,

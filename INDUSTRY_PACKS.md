@@ -35,6 +35,33 @@ R10 includes four independently optional reference packs:
 
 Every pack uses the same manifest and registration pipeline. A pack may not depend on another pack, and core hosts must start with no packs enabled.
 
+## Manifest Contract
+
+`pack.json` uses manifest contract `1.0`, documented by
+`schemas/industry-pack-manifest.v1.schema.json`. The manifest must declare:
+
+- `manifestVersion`: exactly `1.0` for the current loader;
+- `version`: the pack's three-part semantic version;
+- `requiresCore`: the minimum compatible OpenPortalKit core version;
+- every registration switch and every resource list, including empty lists;
+- relative `.json` resource paths contained by the pack directory.
+
+Unknown or missing properties, unsupported manifest versions, path traversal, duplicate resources, invalid JSON,
+registration/resource mismatches, and newer core requirements fail closed. Every loaded resource receives a SHA-256
+checksum, and enabled installations reject checksum drift during startup rehydration.
+
+Validate one pack or the complete portfolio after building:
+
+```bash
+./tools/opk industry-pack validate --path industry-packs/Technology
+./tools/opk industry-pack validate --path industry-packs --format json
+```
+
+Changing a resource or manifest requires a pack version increment. Backward-compatible additions increment the minor
+version while fixes increment the patch version. Breaking resource semantics require a major version increment and a
+documented migration. A future manifest format uses a new `manifestVersion`; existing loaders must reject it until
+support is implemented.
+
 ## Pack Boundaries
 
 The Finance Pack is a demonstration of regulated, data-heavy publishing. Its concepts must remain inside `industry-packs/Finance` until a generic core abstraction is explicitly justified and documented.

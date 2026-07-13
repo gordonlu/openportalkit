@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openportalkit.org/schemas/industry-pack-manifest.v1.schema.json",
+  "title": "OpenPortalKit Industry Pack Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "name",
+    "displayName",
+    "description",
+    "version",
+    "requiresCore",
+    "registers",
+    "resources"
+  ],
+  "properties": {
+    "manifestVersion": { "const": "1.0" },
+    "name": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "version": { "$ref": "#/$defs/semanticVersion" },
+    "requiresCore": { "$ref": "#/$defs/semanticVersion" },
+    "registers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentTypes", "datasets", "rules", "templates", "dashboardCards", "seedData"],
+      "properties": {
+        "contentTypes": { "type": "boolean" },
+        "datasets": { "type": "boolean" },
+        "rules": { "type": "boolean" },
+        "templates": { "type": "boolean" },
+        "dashboardCards": { "type": "boolean" },
+        "seedData": { "type": "boolean" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentTypes", "datasets", "rules", "templates", "dashboardCards", "seedData"],
+      "properties": {
+        "contentTypes": { "$ref": "#/$defs/resourcePaths" },
+        "datasets": { "$ref": "#/$defs/resourcePaths" },
+        "rules": { "$ref": "#/$defs/resourcePaths" },
+        "templates": { "$ref": "#/$defs/resourcePaths" },
+        "dashboardCards": { "$ref": "#/$defs/resourcePaths" },
+        "seedData": { "$ref": "#/$defs/resourcePaths" }
+      }
+    }
+  },
+  "$defs": {
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "resourcePaths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.json$"
+      }
+    }
+  }
+}

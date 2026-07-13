@@ -31,11 +31,16 @@ public sealed class PostgresOutboxMessageStore : IOutboxMessageStore
             """;
         AddMessageParameters(command, message);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (await reader.ReadAsync(cancellationToken))
+        OutboxMessage? inserted = null;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
-            return ReadMessage(reader);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                inserted = ReadMessage(reader);
+            }
         }
+
+        if (inserted is not null) return inserted;
 
         return (await FindByIdempotencyKeyAsync(connection, message.IdempotencyKey, cancellationToken)) ??
             throw new InvalidOperationException("Outbox insert did not return or persist a message.");

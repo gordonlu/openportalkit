@@ -14,6 +14,16 @@ public sealed partial class IndustryPackLoader
 
     private readonly Version _coreVersion;
 
+    private static readonly IReadOnlySet<string> ManifestProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "manifestVersion", "name", "displayName", "description", "version", "requiresCore", "registers", "resources"
+    };
+
+    private static readonly IReadOnlySet<string> RegistrationProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "contentTypes", "datasets", "rules", "templates", "dashboardCards", "seedData"
+    };
+
     public IndustryPackLoader(string coreVersion)
     {
         if (!Version.TryParse(coreVersion, out var version))
@@ -42,6 +52,20 @@ public sealed partial class IndustryPackLoader
         try
         {
             manifestJson = await File.ReadAllTextAsync(manifestPath, cancellationToken);
+            using var manifestDocument = JsonDocument.Parse(manifestJson);
+            if (manifestDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return Failed("manifest_root_invalid", "pack.json must use a JSON object root.", "pack.json");
+            }
+
+            ValidateObjectProperties(manifestDocument.RootElement, ManifestProperties, "pack.json", errors);
+            ValidateNestedObject(manifestDocument.RootElement, "registers", RegistrationProperties, errors);
+            ValidateNestedObject(manifestDocument.RootElement, "resources", RegistrationProperties, errors);
+            if (errors.Count > 0)
+            {
+                return new IndustryPackLoadResult(null, errors);
+            }
+
             manifest = JsonSerializer.Deserialize<IndustryPackManifest>(manifestJson, JsonOptions);
         }
         catch (JsonException exception)
@@ -55,6 +79,10 @@ public sealed partial class IndustryPackLoader
         }
 
         ValidateManifest(manifest, errors);
+        if (manifest.Registers is null || manifest.Resources is null)
+        {
+            return new IndustryPackLoadResult(null, errors);
+        }
         var resources = new List<IndustryPackResource>();
         var declaredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var declaration in manifest.Resources.Enumerate())
@@ -126,6 +154,14 @@ public sealed partial class IndustryPackLoader
 
     private void ValidateManifest(IndustryPackManifest manifest, ICollection<IndustryPackValidationError> errors)
     {
+        if (!string.Equals(manifest.ManifestVersion, IndustryPackContract.ManifestVersion, StringComparison.Ordinal))
+        {
+            errors.Add(new IndustryPackValidationError(
+                "manifest_schema_version_unsupported",
+                $"manifestVersion must be '{IndustryPackContract.ManifestVersion}'.",
+                "pack.json"));
+        }
+
         if (!PackNamePattern().IsMatch(manifest.Name))
         {
             errors.Add(new IndustryPackValidationError(
@@ -159,6 +195,32 @@ public sealed partial class IndustryPackLoader
                 "manifest_core_version_unsupported",
                 $"Pack requires core {requiredCore}, but the host provides {_coreVersion}.",
                 "pack.json"));
+        }
+
+        if (manifest.Registers is null)
+        {
+            errors.Add(new IndustryPackValidationError("manifest_registers_required", "registers is required.", "pack.json"));
+        }
+
+        if (manifest.Resources is null)
+        {
+            errors.Add(new IndustryPackValidationError("manifest_resources_required", "resources is required.", "pack.json"));
+        }
+
+        if (manifest.Registers is not null && !new[]
+            {
+                manifest.Registers.ContentTypes,
+                manifest.Registers.Datasets,
+                manifest.Registers.Rules,
+                manifest.Registers.Templates,
+                manifest.Registers.DashboardCards,
+                manifest.Registers.SeedData
+            }.Any(enabled => enabled))
+        {
+            errors.Add(new IndustryPackValidationError(
+                "manifest_registration_required",
+                "At least one registration must be enabled.",
+                "pack.json#/registers"));
         }
     }
 
@@ -194,6 +256,50 @@ public sealed partial class IndustryPackLoader
                     $"Resources for '{name}' are declared but the registration is disabled.",
                     "pack.json"));
             }
+        }
+    }
+
+    private static void ValidateNestedObject(
+        JsonElement root,
+        string propertyName,
+        IReadOnlySet<string> properties,
+        ICollection<IndustryPackValidationError> errors)
+    {
+        if (!root.TryGetProperty(propertyName, out var nested) || nested.ValueKind != JsonValueKind.Object)
+        {
+            errors.Add(new IndustryPackValidationError(
+                "manifest_property_invalid",
+                $"'{propertyName}' must be a JSON object.",
+                $"pack.json#/{propertyName}"));
+            return;
+        }
+
+        ValidateObjectProperties(nested, properties, $"pack.json#/{propertyName}", errors);
+    }
+
+    private static void ValidateObjectProperties(
+        JsonElement element,
+        IReadOnlySet<string> properties,
+        string path,
+        ICollection<IndustryPackValidationError> errors)
+    {
+        var actual = element.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+        var unknown = actual.Except(properties, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        var missing = properties.Except(actual, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (unknown.Length > 0)
+        {
+            errors.Add(new IndustryPackValidationError(
+                "manifest_property_unknown",
+                "Unknown properties: " + string.Join(", ", unknown),
+                path));
+        }
+
+        if (missing.Length > 0)
+        {
+            errors.Add(new IndustryPackValidationError(
+                "manifest_property_missing",
+                "Required properties are missing: " + string.Join(", ", missing),
+                path));
         }
     }
 

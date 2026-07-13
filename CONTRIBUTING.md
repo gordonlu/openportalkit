@@ -15,7 +15,23 @@ dotnet build OpenPortalKit.sln -m:1
 ./tools/run-tests.ps1
 ./tools/check-vulnerable-packages.ps1
 ./tools/check-boundaries.ps1
+./tools/opk.ps1 check-agent-readiness
 ```
+
+On Linux, use `./tools/opk check-boundaries` and `./tools/opk check-agent-readiness` after building.
+Use `--format json` when another tool needs to consume the findings. Before a production release, run
+`check-agent-readiness --url <public-base-url>` against the deployed candidate.
+
+`tools/run-tests.ps1` starts the already-built ApiHost and AdminHost on random loopback ports and runs their
+integration suite. PostgreSQL tests use an isolated random schema and require an explicit disposable test database:
+
+```powershell
+$env:OPK_POSTGRES_INTEGRATION = "Host=127.0.0.1;Port=15432;Database=openportalkit;Username=openportalkit;Password=openportalkit_dev"
+./tools/run-tests.ps1
+```
+
+The PostgreSQL project is explicitly skipped when that variable is absent, but it remains mandatory in the dedicated
+CI job. Never point it at a database account that cannot create and drop isolated schemas.
 
 ## Pull Request Expectations
 

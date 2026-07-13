@@ -2,6 +2,7 @@ namespace OpenPortalKit.Modules.IndustryPacks;
 
 public sealed class IndustryPackManifest
 {
+    public string ManifestVersion { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.example.v1",
+  "route": "/examples/finance",
+  "template": "investor-disclosure-centre",
+  "modules": ["Content", "Data", "Search", "Seo", "Dashboard", "Workflow", "Audit", "IndustryPacks"],
+  "industryPack": "Finance",
+  "publicOutputs": ["html", "markdown", "json", "csv", "sitemap", "rss", "openapi", "agent"]
+}

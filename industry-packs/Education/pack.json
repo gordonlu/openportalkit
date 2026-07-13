@@ -1,4 +1,5 @@
 {
+  "manifestVersion": "1.0",
   "name": "Education",
   "displayName": "Education Pack",
   "description": "Optional pack for program, course, faculty, research, admissions, and academic-calendar publishing.",

@@ -1,0 +1,3 @@
+source_id,title,slug,summary,body,old_url,asset_paths
+legacy-1001,Welcome to Northstar,welcome-to-northstar,An introduction to the new portal,This content was exported from the legacy MVC application.,/about/welcome,/assets/welcome.pdf
+legacy-1002,Publishing standards,publishing-standards,How public outputs are reviewed,Every public output requires an approved source and audit history.,/standards/publishing,/assets/publishing-standard.pdf

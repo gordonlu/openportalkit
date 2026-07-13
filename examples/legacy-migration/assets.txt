@@ -1,0 +1,3 @@
+# Read-only inventory exported with the legacy content batch.
+/assets/welcome.pdf
+/assets/publishing-standard.pdf

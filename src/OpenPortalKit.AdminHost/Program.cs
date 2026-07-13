@@ -71,7 +71,7 @@ var industryPackRoot = Path.GetFullPath(Path.Combine(
     builder.Environment.ContentRootPath,
     builder.Configuration["OpenPortalKit:IndustryPacks:RootPath"] ?? "../../industry-packs"));
 var industryPackCatalog = new IndustryPackCatalog(new IndustryPackLoader(
-    builder.Configuration["OpenPortalKit:IndustryPacks:CoreVersion"] ?? "0.1.0"));
+    builder.Configuration["OpenPortalKit:IndustryPacks:CoreVersion"] ?? IndustryPackContract.CurrentCoreVersion));
 var industryPackCatalogResult = industryPackCatalog.DiscoverAsync(industryPackRoot).GetAwaiter().GetResult();
 if (!industryPackCatalogResult.Succeeded)
 {

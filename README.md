@@ -40,8 +40,10 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R11 bounded public API pagination, conditional `ETag`/`Last-Modified` requests, and removal of content-list N+1 reads
 - R11 PostgreSQL query audit with targeted analytics and public-page indexes in `0015_query_performance_indexes.sql`
 - R11 closed acceptance baseline with fail-closed production hosts, upload signature validation, dependency scanning, and sequential CI tests
+- R12 cross-platform `opk` CLI foundation with machine-readable boundary and AgentSEO readiness checks
+- Crawlable HTML content at `/content/{slug}` and JSON-LD/Open Graph metadata on public content and block pages
 - Architecture guardrail documents from R0
-- Boundary check script for forbidden core terminology
+- Tested structural boundary checks for industry neutrality, module dependency direction, public credential-field leakage, and migration coverage
 
 ## Repository Layout
 
@@ -65,6 +67,37 @@ dotnet build OpenPortalKit.sln -m:1
 powershell -ExecutionPolicy Bypass -File ./tools/check-boundaries.ps1
 ```
 
+The normal test runner executes package-free unit and Host integration projects sequentially:
+
+```powershell
+./tools/run-tests.ps1
+```
+
+Set `OPK_POSTGRES_INTEGRATION` to include the isolated-schema PostgreSQL integration project. CI runs this against a
+dedicated PostgreSQL 17 service even when a developer workstation has no local database configured.
+
+## Developer CLI
+
+Build the solution once, then run the repository checks through the cross-platform wrapper:
+
+```bash
+./tools/opk --help
+./tools/opk check-boundaries
+./tools/opk check-agent-readiness
+./tools/opk check-agent-readiness --url https://portal.example.com
+./tools/opk industry-pack add --name Example --output /tmp/opk-packs
+./tools/opk industry-pack validate --path industry-packs
+./tools/opk import legacy --input legacy.csv --assets assets.txt --output report.json --source legacy-mvc --import-batch batch-001 --as-of 2026-07-12 --schema-version legacy-content.v1
+```
+
+PowerShell users can invoke the same implementation through `./tools/opk.ps1`. Both checks support
+`--format json` for CI and coding-agent integrations. A failed rule returns exit code `1`; invalid usage
+returns exit code `2`.
+
+Runnable portal examples and their versioned fixtures are documented in `examples/README.md`. Public contract
+compatibility and release evidence requirements are defined in `docs/compatibility-policy.md` and
+`docs/release-checklist.md`.
+
 ## Run Initial Hosts
 
 ```powershell
@@ -87,6 +120,7 @@ The API host exposes:
 - `/.well-known/agent.json`
 - `/api/openapi.json`
 - `/api/public/content`
+- `/content/{slug}`
 - `/api/public/content/{slug}.json`
 - `/content/{slug}.md`
 - `/api/public/redirects/resolve`
@@ -115,6 +149,7 @@ R8 Agent Access and AgentSEO notes are in `docs/r8-agent-access.md`.
 R9 Block Template System notes are in `docs/r9-block-template-system.md`.
 R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
 R11 production hardening notes are in `docs/r11-production-hardening.md`.
+R12 stabilization status and the 1.0 acceptance matrix are in `docs/r12-developer-experience.md`.
 
 ## Product Boundary
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
 using OpenPortalKit.Modules.Seo.Revalidation;
 
@@ -9,6 +10,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("llms text publishes concise and full discovery", LlmsTextPublishesConciseAndFullDiscovery),
     ("agent manifest exposes public resources and bot policy", AgentManifestExposesPublicResourcesAndBotPolicy),
     ("openapi document describes public read endpoints", OpenApiDocumentDescribesPublicReadEndpoints),
+    ("openapi operations have stable identifiers and declared path parameters", OpenApiOperationsAreStable),
+    ("api host publishes the public contract version header", ApiHostPublishesContractVersionHeader),
     ("bot policy options normalize allow list", BotPolicyOptionsNormalizeAllowList),
     ("artifact generator creates traceable snapshot artifacts", ArtifactGeneratorCreatesTraceableSnapshotArtifacts),
     ("artifact regenerator stores outputs for revalidation plans", ArtifactRegeneratorStoresOutputsForRevalidationPlans),
@@ -105,6 +108,9 @@ static Task OpenApiDocumentDescribesPublicReadEndpoints()
     var paths = json.RootElement.GetProperty("paths");
 
     Assert.Equal("3.1.0", json.RootElement.GetProperty("openapi").GetString());
+    Assert.Equal(PublicApiContract.Version, json.RootElement.GetProperty("info").GetProperty("version").GetString());
+    Assert.Equal(PublicApiContract.Version, json.RootElement.GetProperty("x-openportalkit-contract-version").GetString());
+    Assert.True(paths.TryGetProperty("/content/{slug}", out _), "Expected semantic HTML content path.");
     Assert.True(paths.TryGetProperty("/api/public/content/{slug}.json", out _), "Expected JSON snapshot path.");
     Assert.True(paths.TryGetProperty("/content/{slug}.md", out _), "Expected Markdown snapshot path.");
     Assert.True(paths.TryGetProperty("/pages/{slug}", out _), "Expected public page path.");
@@ -119,6 +125,53 @@ static Task OpenApiDocumentDescribesPublicReadEndpoints()
     Assert.True(paths.TryGetProperty("/llms.txt", out _), "Expected llms.txt path.");
     Assert.True(paths.TryGetProperty("/.well-known/agent.json", out _), "Expected agent manifest path.");
 
+    var searchParameters = paths.GetProperty("/api/public/search").GetProperty("get").GetProperty("parameters");
+    var query = searchParameters.EnumerateArray().Single(parameter => parameter.GetProperty("name").GetString() == "q");
+    Assert.True(query.GetProperty("required").GetBoolean(), "Search query parameter must be required.");
+    Assert.Equal(200, query.GetProperty("schema").GetProperty("maxLength").GetInt32());
+
+    var recordParameters = paths.GetProperty("/api/public/datasets/{code}/records")
+        .GetProperty("get").GetProperty("parameters");
+    var recordLimit = recordParameters.EnumerateArray().Single(parameter => parameter.GetProperty("name").GetString() == "limit");
+    Assert.Equal(50, recordLimit.GetProperty("schema").GetProperty("default").GetInt32());
+
+    return Task.CompletedTask;
+}
+
+static Task OpenApiOperationsAreStable()
+{
+    using var json = JsonDocument.Parse(AgentOpenApiGenerator.Generate(CreateProfile()));
+    var operationIds = new HashSet<string>(StringComparer.Ordinal);
+
+    foreach (var path in json.RootElement.GetProperty("paths").EnumerateObject())
+    {
+        var operation = path.Value.GetProperty("get");
+        var operationId = operation.GetProperty("operationId").GetString();
+        Assert.True(!string.IsNullOrWhiteSpace(operationId), $"{path.Name} omitted operationId.");
+        Assert.True(operationIds.Add(operationId!), $"Duplicate operationId '{operationId}'.");
+
+        var declaredPathParameters = operation.TryGetProperty("parameters", out var parameters)
+            ? parameters.EnumerateArray()
+                .Where(parameter => parameter.GetProperty("in").GetString() == "path")
+                .Select(parameter => parameter.GetProperty("name").GetString())
+                .ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string?>(StringComparer.Ordinal);
+        foreach (Match match in Regex.Matches(path.Name, "\\{([^}]+)\\}"))
+        {
+            var parameterName = match.Groups[1].Value;
+            Assert.True(declaredPathParameters.Contains(parameterName),
+                $"{path.Name} did not declare path parameter '{parameterName}'.");
+        }
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task ApiHostPublishesContractVersionHeader()
+{
+    var source = File.ReadAllText(Path.Combine("src", "OpenPortalKit.ApiHost", "Program.cs"));
+    Assert.Contains("PublicApiContract.VersionHeaderName", source);
+    Assert.Contains("PublicApiContract.Version", source);
     return Task.CompletedTask;
 }
 

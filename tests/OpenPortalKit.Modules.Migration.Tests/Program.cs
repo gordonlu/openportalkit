@@ -6,7 +6,8 @@ var tests = new (string Name, Action Run)[]
     ("valid legacy CSV produces a traceable dry run", ValidCsvProducesTraceableReport),
     ("migration analysis blocks duplicates and missing assets", AnalysisBlocksUnsafeRows),
     ("migration analysis flags duplicate content", AnalysisFlagsDuplicateContent),
-    ("validated migration batches stage idempotently and rollback with audit", StagingIsControlled)
+    ("validated migration batches stage idempotently and rollback with audit", StagingIsControlled),
+    ("postgres migration preserves legacy batch traceability", PostgresMigrationPreservesTraceability)
 };
 
 foreach (var test in tests)
@@ -95,6 +96,24 @@ static void StagingIsControlled()
     var logs = audits.FindByActorAsync(actor).Result;
     Assert(logs.Any(log => log.Action == "legacy-migration.staged") &&
            logs.Any(log => log.Action == "legacy-migration.rolled-back"), "Staging audit trail is incomplete.");
+}
+
+static void PostgresMigrationPreservesTraceability()
+{
+    const string migrationName = "0014_legacy_migration_staging.sql";
+    var current = new DirectoryInfo(AppContext.BaseDirectory);
+    while (current is not null && !File.Exists(Path.Combine(current.FullName, "OpenPortalKit.sln")))
+        current = current.Parent;
+    if (current is null) throw new DirectoryNotFoundException("Repository root was not found.");
+
+    var sql = File.ReadAllText(Path.Combine(current.FullName, "db", "postgresql", "migrations", migrationName));
+    Assert(sql.Contains("legacy_migration_batches", StringComparison.OrdinalIgnoreCase), "Migration table is missing.");
+    Assert(sql.Contains("source text", StringComparison.OrdinalIgnoreCase), "Source traceability is missing.");
+    Assert(sql.Contains("import_batch", StringComparison.OrdinalIgnoreCase), "Import batch traceability is missing.");
+    Assert(sql.Contains("as_of_date", StringComparison.OrdinalIgnoreCase), "As-of traceability is missing.");
+    Assert(sql.Contains("source_checksum", StringComparison.OrdinalIgnoreCase), "Checksum traceability is missing.");
+    Assert(sql.Contains("schema_version", StringComparison.OrdinalIgnoreCase), "Schema version traceability is missing.");
+    Assert(sql.Contains("staged_at", StringComparison.OrdinalIgnoreCase), "Staging timestamp traceability is missing.");
 }
 
 static void AssertThrows<TException>(Action action) where TException : Exception

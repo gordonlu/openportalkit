@@ -1,4 +1,5 @@
 {
+  "manifestVersion": "1.0",
   "name": "Entertainment",
   "displayName": "Entertainment Pack",
   "description": "Optional pack for title, release, event, editorial, talent, and public media-catalog publishing.",

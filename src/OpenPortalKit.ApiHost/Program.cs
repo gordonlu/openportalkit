@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using System.Data.Common;
+using System.Text;
 using System.Text.Encodings.Web;
 using Npgsql;
 using OpenPortalKit.Kernel.Configuration;
@@ -140,6 +141,17 @@ var app = builder.Build();
 
 app.UseRouting();
 app.UseOpenPortalKitProductionHardening();
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/public") ||
+        context.Request.Path.Equals("/api/openapi.json", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers[PublicApiContract.VersionHeaderName] = PublicApiContract.Version;
+    }
+
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
@@ -417,6 +429,27 @@ app.MapGet("/api/public/content", async (
     return Results.Ok(new PublicPage<object>(items, offset, limit, documents.Count > limit));
 });
 
+app.MapGet("/content/{slug}", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
+{
+    var siteBaseUrl = GetSiteBaseUrl(request);
+    var document = await FindAgentContentDocumentAsync(siteBaseUrl, contentStore, slug);
+    if (document is null) return Results.NotFound();
+    if (ApplyConditionalHeaders(request, "content-html:" + document.Id, document.UpdatedAt))
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+
+    var metadata = SeoPageMetadataBuilder.Build(
+        new PublicResourceDescriptor(
+            document.Title,
+            document.Summary,
+            "/content/" + document.Slug,
+            document.PublishedAt,
+            document.UpdatedAt,
+            "en-US"),
+        siteBaseUrl,
+        "OpenPortalKit");
+    return Results.Content(BuildPublicContentHtml(document, metadata), "text/html; charset=utf-8");
+});
+
 app.MapGet("/content/{slug}.md", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
 {
     var document = await FindAgentContentDocumentAsync(GetSiteBaseUrl(request), contentStore, slug);
@@ -448,10 +481,21 @@ app.MapGet("/pages/{slug}", async (
         return Results.NotFound();
     }
 
-    var canonicalUrl = CanonicalUrlBuilder.Build(GetSiteBaseUrl(request), "/pages/" + page.Slug);
+    var siteBaseUrl = GetSiteBaseUrl(request);
+    var metadata = SeoPageMetadataBuilder.Build(
+        new PublicResourceDescriptor(
+            page.Title,
+            page.Summary,
+            "/pages/" + page.Slug,
+            page.PublishedAt!.Value,
+            page.UpdatedAt,
+            "en-US"),
+        siteBaseUrl,
+        "OpenPortalKit",
+        "WebPage");
     if (ApplyConditionalHeaders(request, $"page-html:{page.Id}:{page.Revision}", page.UpdatedAt))
         return Results.StatusCode(StatusCodes.Status304NotModified);
-    var html = BuildPublicPageHtml(page, canonicalUrl, await renderer.RenderBodyAsync(page));
+    var html = BuildPublicPageHtml(page, metadata, await renderer.RenderBodyAsync(page));
     return Results.Content(html, "text/html; charset=utf-8");
 });
 
@@ -1028,18 +1072,53 @@ static async Task<IReadOnlyList<PublicResourceDescriptor>> GetPublicResourceDesc
         .ToArray();
 }
 
-static string BuildPublicPageHtml(PortalPage page, Uri canonicalUrl, string body)
+static string BuildPublicContentHtml(AgentContentDocument document, SeoPageMetadata metadata)
 {
     var encoder = HtmlEncoder.Default;
+    var body = string.Join(
+        Environment.NewLine,
+        document.Body.Split(["\r\n\r\n", "\n\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(paragraph => $"<p>{encoder.Encode(paragraph)}</p>"));
+    var source = string.IsNullOrWhiteSpace(document.Source)
+        ? string.Empty
+        : $"<p class=\"opk-page-data-source\"><strong>Source:</strong> {encoder.Encode(document.Source)}</p>";
+
     return $"""
         <!doctype html>
         <html lang="en">
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>{encoder.Encode(page.Title)}</title>
-            <meta name="description" content="{encoder.Encode(page.Summary)}">
-            <link rel="canonical" href="{encoder.Encode(canonicalUrl.ToString())}">
+            {BuildMetadataHtml(metadata)}
+            <style>{BuildPublicPageStyles()}</style>
+        </head>
+        <body>
+            <header class="opk-public-header"><div>OpenPortalKit</div></header>
+            <main>
+                <article>
+                    <header class="opk-page-hero">
+                        <h1>{encoder.Encode(document.Title)}</h1>
+                        <p>{encoder.Encode(document.Summary)}</p>
+                        <time datetime="{encoder.Encode(document.PublishedAt.ToString("O"))}">Published {encoder.Encode(document.PublishedAt.ToString("yyyy-MM-dd"))}</time>
+                    </header>
+                    <section aria-label="Article content">{body}{source}</section>
+                </article>
+            </main>
+            <footer class="opk-public-footer"><div>Canonical, versioned public content from OpenPortalKit.</div></footer>
+        </body>
+        </html>
+        """;
+}
+
+static string BuildPublicPageHtml(PortalPage page, SeoPageMetadata metadata, string body)
+{
+    return $"""
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            {BuildMetadataHtml(metadata)}
             <style>{BuildPublicPageStyles()}</style>
         </head>
         <body>
@@ -1049,6 +1128,24 @@ static string BuildPublicPageHtml(PortalPage page, Uri canonicalUrl, string body
         </body>
         </html>
         """;
+}
+
+static string BuildMetadataHtml(SeoPageMetadata metadata)
+{
+    var encoder = HtmlEncoder.Default;
+    var builder = new StringBuilder();
+    builder.Append("<title>").Append(encoder.Encode(metadata.Title)).AppendLine("</title>");
+    builder.Append("<meta name=\"description\" content=\"")
+        .Append(encoder.Encode(metadata.Description)).AppendLine("\">");
+    builder.Append("<link rel=\"canonical\" href=\"")
+        .Append(encoder.Encode(metadata.CanonicalUrl.ToString())).AppendLine("\">");
+    foreach (var item in metadata.OpenGraph.OrderBy(item => item.Key, StringComparer.Ordinal))
+    {
+        builder.Append("<meta property=\"").Append(encoder.Encode(item.Key)).Append("\" content=\"")
+            .Append(encoder.Encode(item.Value)).AppendLine("\">");
+    }
+    builder.Append("<script type=\"application/ld+json\">").Append(metadata.JsonLd).AppendLine("</script>");
+    return builder.ToString();
 }
 
 static string BuildPublicPageStyles()

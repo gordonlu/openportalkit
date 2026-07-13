@@ -6,10 +6,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("catalog discovers four independently valid reference packs", CatalogDiscoversReferencePacks),
     ("loader rejects resources outside the pack root", LoaderRejectsPathTraversal),
     ("loader rejects packs requiring a newer core", LoaderRejectsNewerCore),
-    ("generic pack module remains industry neutral", GenericModuleRemainsIndustryNeutral)
-    ,("pack enablement is audited and idempotent", PackEnablementIsAuditedAndIdempotent)
-    ,("installation migration preserves checksummed state", InstallationMigrationPreservesChecksummedState)
-    ,("enabled packs rehydrate and checksum drift fails closed", EnabledPacksRehydrateAndChecksumDriftFailsClosed)
+    ("loader rejects unsupported manifest versions and unknown properties", LoaderRejectsIncompatibleManifest),
+    ("manifest JSON schema describes the enforced v1 contract", ManifestSchemaDescribesV1Contract),
+    ("generic pack module remains industry neutral", GenericModuleRemainsIndustryNeutral),
+    ("pack enablement is audited and idempotent", PackEnablementIsAuditedAndIdempotent),
+    ("installation migration preserves checksummed state", InstallationMigrationPreservesChecksummedState),
+    ("enabled packs rehydrate and checksum drift fails closed", EnabledPacksRehydrateAndChecksumDriftFailsClosed)
 };
 
 var failures = 0;
@@ -81,6 +83,44 @@ static async Task LoaderRejectsNewerCore()
     {
         Directory.Delete(root, recursive: true);
     }
+}
+
+static async Task LoaderRejectsIncompatibleManifest()
+{
+    var root = CreateTemporaryPack("FutureManifest", "0.1.0", "content-types/catalog.json", "2.0");
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(root, "content-types"));
+        await File.WriteAllTextAsync(Path.Combine(root, "content-types", "catalog.json"),
+            """{"schemaVersion":"test.v1"}""");
+        var unsupported = await new IndustryPackLoader(IndustryPackContract.CurrentCoreVersion).LoadAsync(root);
+        Assert.Contains("manifest_schema_version_unsupported", unsupported.Errors.Select(error => error.Code));
+
+        var manifestPath = Path.Combine(root, "pack.json");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(manifestPath, manifest.Replace(
+            "\"manifestVersion\": \"2.0\",",
+            "\"manifestVersion\": \"1.0\",\n  \"unexpected\": true,",
+            StringComparison.Ordinal));
+        var unknown = await new IndustryPackLoader(IndustryPackContract.CurrentCoreVersion).LoadAsync(root);
+        Assert.Contains("manifest_property_unknown", unknown.Errors.Select(error => error.Code));
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static Task ManifestSchemaDescribesV1Contract()
+{
+    using var document = System.Text.Json.JsonDocument.Parse(
+        File.ReadAllText(Path.Combine("schemas", "industry-pack-manifest.v1.schema.json")));
+    var root = document.RootElement;
+    Assert.Equal("https://json-schema.org/draft/2020-12/schema", root.GetProperty("$schema").GetString());
+    Assert.Equal(IndustryPackContract.ManifestVersion,
+        root.GetProperty("properties").GetProperty("manifestVersion").GetProperty("const").GetString());
+    Assert.False(root.GetProperty("additionalProperties").GetBoolean(), "Manifest schema must reject unknown properties.");
+    return Task.CompletedTask;
 }
 
 static Task GenericModuleRemainsIndustryNeutral()
@@ -157,19 +197,38 @@ static async Task EnabledPacksRehydrateAndChecksumDriftFailsClosed()
         "Expected checksum drift error.");
 }
 
-static string CreateTemporaryPack(string name, string requiresCore, string resourcePath)
+static string CreateTemporaryPack(
+    string name,
+    string requiresCore,
+    string resourcePath,
+    string manifestVersion = IndustryPackContract.ManifestVersion)
 {
     var root = Path.Combine(Path.GetTempPath(), "opk-pack-tests", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(root);
     File.WriteAllText(Path.Combine(root, "pack.json"), $$"""
         {
+          "manifestVersion": "{{manifestVersion}}",
           "name": "{{name}}",
           "displayName": "{{name}} Pack",
           "description": "Test pack.",
           "version": "0.1.0",
           "requiresCore": "{{requiresCore}}",
-          "registers": { "contentTypes": true },
-          "resources": { "contentTypes": ["{{resourcePath}}"] }
+          "registers": {
+            "contentTypes": true,
+            "datasets": false,
+            "rules": false,
+            "templates": false,
+            "dashboardCards": false,
+            "seedData": false
+          },
+          "resources": {
+            "contentTypes": ["{{resourcePath}}"],
+            "datasets": [],
+            "rules": [],
+            "templates": [],
+            "dashboardCards": [],
+            "seedData": []
+          }
         }
         """);
     return root;

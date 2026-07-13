@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opk.example.v1",
+  "route": "/examples/data",
+  "template": "dataset-catalogue",
+  "modules": ["Data", "Content", "Search", "Seo", "Dashboard", "Audit"],
+  "industryPack": null,
+  "publicOutputs": ["html", "json", "csv", "schema", "sitemap", "openapi", "agent"]
+}
