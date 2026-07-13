@@ -8,5 +8,6 @@ public enum BlockSettingType
     Number,
     Boolean,
     ContentQuery,
-    DataSetReference
+    DataSetReference,
+    StructuredList
 }

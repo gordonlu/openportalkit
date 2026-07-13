@@ -18,14 +18,16 @@ public sealed class PostgresPageStore : IPageStore
         ArgumentNullException.ThrowIfNull(page);
 
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             insert into opk_portal_pages (
-                id, site_id, template_id, template_version, title, slug, summary, status, blocks_json,
+                id, site_id, template_id, template_version, title, slug, summary, status, blocks_json, revision,
                 created_by, updated_by, created_at, updated_at, published_at)
             values (
                 @id, @site_id, @template_id, @template_version, @title, @slug, @summary, @status,
-                cast(@blocks_json as jsonb), @created_by, @updated_by, @created_at, @updated_at, @published_at)
+                cast(@blocks_json as jsonb), @revision, @created_by, @updated_by, @created_at, @updated_at, @published_at)
             on conflict (id) do update
             set template_id = excluded.template_id,
                 template_version = excluded.template_version,
@@ -34,12 +36,27 @@ public sealed class PostgresPageStore : IPageStore
                 summary = excluded.summary,
                 status = excluded.status,
                 blocks_json = excluded.blocks_json,
+                revision = excluded.revision,
                 updated_by = excluded.updated_by,
                 updated_at = excluded.updated_at,
                 published_at = excluded.published_at
             """;
         AddParameters(command, page);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await using var versionCommand = connection.CreateCommand();
+        versionCommand.Transaction = transaction;
+        versionCommand.CommandText = """
+            insert into opk_portal_page_versions (page_id, revision, snapshot_json, created_by, created_at)
+            values (@page_id, @revision, cast(@snapshot_json as jsonb), @created_by, @created_at)
+            on conflict (page_id, revision) do nothing
+            """;
+        versionCommand.AddParameter("@page_id", page.Id, DbType.Guid);
+        versionCommand.AddParameter("@revision", page.Revision, DbType.Int32);
+        versionCommand.AddParameter("@snapshot_json", JsonSerializer.Serialize(page), DbType.String);
+        versionCommand.AddParameter("@created_by", page.UpdatedBy, DbType.Guid);
+        versionCommand.AddParameter("@created_at", page.UpdatedAt, DbType.DateTimeOffset);
+        await versionCommand.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return page;
     }
 
@@ -83,8 +100,34 @@ public sealed class PostgresPageStore : IPageStore
         return pages;
     }
 
+    public async Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
+        Guid pageId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            select page_id, revision, snapshot_json::text, created_by, created_at
+            from opk_portal_page_versions
+            where page_id = @page_id
+            order by revision desc
+            """;
+        command.AddParameter("@page_id", pageId, DbType.Guid);
+        var versions = new List<PortalPageVersion>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var snapshot = JsonSerializer.Deserialize<PortalPage>(reader.GetString(2)) ??
+                throw new InvalidOperationException("Portal page version snapshot could not be deserialized.");
+            versions.Add(new PortalPageVersion(
+                reader.GetGuid(0), reader.GetInt32(1), snapshot, reader.GetGuid(3), reader.ReadDateTimeOffset(4)));
+        }
+
+        return versions;
+    }
+
     private const string SelectBase = """
-        select id, site_id, template_id, template_version, title, slug, summary, status, blocks_json::text,
+        select id, site_id, template_id, template_version, title, slug, summary, status, blocks_json::text, revision,
             created_by, updated_by, created_at, updated_at, published_at
         from opk_portal_pages
         """;
@@ -100,6 +143,7 @@ public sealed class PostgresPageStore : IPageStore
         command.AddParameter("@summary", page.Summary, DbType.String);
         command.AddParameter("@status", page.Status.ToString(), DbType.String);
         command.AddParameter("@blocks_json", JsonSerializer.Serialize(page.Blocks), DbType.String);
+        command.AddParameter("@revision", page.Revision, DbType.Int32);
         command.AddParameter("@created_by", page.CreatedBy, DbType.Guid);
         command.AddParameter("@updated_by", page.UpdatedBy, DbType.Guid);
         command.AddParameter("@created_at", page.CreatedAt, DbType.DateTimeOffset);
@@ -120,10 +164,11 @@ public sealed class PostgresPageStore : IPageStore
             reader.GetString(6),
             Enum.Parse<PortalPageStatus>(reader.GetString(7), ignoreCase: true),
             blocks,
-            reader.GetGuid(9),
             reader.GetGuid(10),
-            reader.ReadDateTimeOffset(11),
+            reader.GetGuid(11),
             reader.ReadDateTimeOffset(12),
-            reader.IsDBNull(13) ? null : reader.ReadDateTimeOffset(13));
+            reader.ReadDateTimeOffset(13),
+            reader.IsDBNull(14) ? null : reader.ReadDateTimeOffset(14),
+            reader.GetInt32(9));
     }
 }

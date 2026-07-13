@@ -1,6 +1,7 @@
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Modules.Content.ContentItems;
+using System.Text.Json;
 
 namespace OpenPortalKit.Modules.Content.BlockTemplates;
 
@@ -10,6 +11,7 @@ public sealed class PortalPageService
     private readonly IPageStore _pageStore;
     private readonly AuditRecorder _auditRecorder;
     private readonly IOutboxMessageStore _outboxMessageStore;
+    private readonly IBlockDefinitionCatalog _blockCatalog;
     private readonly Func<DateTimeOffset> _clock;
 
     public PortalPageService(
@@ -17,13 +19,99 @@ public sealed class PortalPageService
         IPageStore pageStore,
         AuditRecorder auditRecorder,
         IOutboxMessageStore outboxMessageStore,
+        IBlockDefinitionCatalog blockCatalog,
         Func<DateTimeOffset>? clock = null)
     {
         _templateStore = templateStore ?? throw new ArgumentNullException(nameof(templateStore));
         _pageStore = pageStore ?? throw new ArgumentNullException(nameof(pageStore));
         _auditRecorder = auditRecorder ?? throw new ArgumentNullException(nameof(auditRecorder));
         _outboxMessageStore = outboxMessageStore ?? throw new ArgumentNullException(nameof(outboxMessageStore));
+        _blockCatalog = blockCatalog ?? throw new ArgumentNullException(nameof(blockCatalog));
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    public async Task<PortalPageOperationResult> UpdateAsync(
+        UpdatePortalPageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var errors = ValidateUpdateRequest(request);
+        if (errors.Count > 0)
+        {
+            return new PortalPageOperationResult(false, null, errors);
+        }
+
+        var page = await _pageStore.FindBySlugAsync(
+            request.SiteId,
+            SlugGenerator.Generate(request.CurrentSlug),
+            cancellationToken);
+        if (page is null || page.Status == PortalPageStatus.Archived)
+        {
+            return new PortalPageOperationResult(false, null, new[] { "Page is not available for editing." });
+        }
+
+        var slug = SlugGenerator.Generate(request.Slug);
+        if (page.Status == PortalPageStatus.Published && !string.Equals(page.Slug, slug, StringComparison.Ordinal))
+        {
+            return new PortalPageOperationResult(false, null, new[] { "A published page slug cannot be changed." });
+        }
+
+        var duplicate = await _pageStore.FindBySlugAsync(request.SiteId, slug, cancellationToken);
+        if (duplicate is not null && duplicate.Id != page.Id)
+        {
+            return new PortalPageOperationResult(false, null, new[] { $"Page slug '{slug}' is already in use." });
+        }
+
+        var blocks = request.Blocks.OrderBy(block => block.SortOrder).ToArray();
+        var validation = PageTemplateValidator.Validate(new PageTemplate(
+            page.TemplateId,
+            "page-validation",
+            request.Title,
+            request.Summary,
+            PageTemplateStatus.Draft,
+            Math.Max(1, page.TemplateVersion),
+            blocks,
+            page.CreatedBy,
+            request.ActorId,
+            page.CreatedAt,
+            _clock()), _blockCatalog);
+        if (!validation.IsValid)
+        {
+            return new PortalPageOperationResult(false, null, validation.Errors);
+        }
+
+        var now = _clock();
+        var updated = page with
+        {
+            Title = request.Title.Trim(),
+            Slug = slug,
+            Summary = request.Summary.Trim(),
+            Blocks = blocks,
+            UpdatedBy = request.ActorId,
+            UpdatedAt = now,
+            Revision = page.Revision + 1
+        };
+        await _pageStore.UpsertAsync(updated, cancellationToken);
+        await _auditRecorder.RecordAsync(new AuditRecordRequest(
+            request.ActorId,
+            "portal-page.updated",
+            "PortalPage",
+            updated.Id.ToString("D"),
+            $"Saved page '{updated.Title}' revision {updated.Revision}.",
+            JsonSerializer.Serialize(new
+            {
+                updated.Slug,
+                updated.Revision,
+                updated.Status,
+                BlockCodes = updated.Blocks.Select(block => block.DefinitionCode).ToArray()
+            })), cancellationToken);
+
+        if (updated.Status == PortalPageStatus.Published)
+        {
+            await EnqueuePublicPageChangeAsync(updated, now, cancellationToken);
+        }
+
+        return new PortalPageOperationResult(true, updated, Array.Empty<string>());
     }
 
     public async Task<PortalPageOperationResult> CreateFromTemplateAsync(
@@ -113,7 +201,8 @@ public sealed class PortalPageService
             Status = PortalPageStatus.Published,
             PublishedAt = now,
             UpdatedAt = now,
-            UpdatedBy = actorId
+            UpdatedBy = actorId,
+            Revision = page.Revision + 1
         };
         await _pageStore.UpsertAsync(published, cancellationToken);
         await _auditRecorder.RecordAsync(new AuditRecordRequest(
@@ -123,21 +212,29 @@ public sealed class PortalPageService
             published.Id.ToString("D"),
             $"Published page '{published.Title}'.",
             null), cancellationToken);
+        await EnqueuePublicPageChangeAsync(published, now, cancellationToken);
+
+        return new PortalPageOperationResult(true, published, Array.Empty<string>());
+    }
+
+    private async Task EnqueuePublicPageChangeAsync(
+        PortalPage page,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
         var integrationEvent = new PortalPagePublishedIntegrationEvent(
             Guid.NewGuid(),
-            now,
-            $"portal-page:{published.Id:D}:published:{published.TemplateVersion}:{now.UtcDateTime.Ticks}",
-            published.SiteId,
-            published.Id,
-            published.Slug,
-            published.Title,
-            published.Summary,
-            now);
+            occurredAt,
+            $"portal-page:{page.Id:D}:revision:{page.Revision}",
+            page.SiteId,
+            page.Id,
+            page.Slug,
+            page.Title,
+            page.Summary,
+            page.PublishedAt ?? occurredAt);
         await _outboxMessageStore.AddAsync(
             OutboxMessageFactory.FromIntegrationEvent(integrationEvent),
             cancellationToken);
-
-        return new PortalPageOperationResult(true, published, Array.Empty<string>());
     }
 
     private static List<string> ValidateCreateRequest(CreatePageFromTemplateRequest request)
@@ -168,6 +265,18 @@ public sealed class PortalPageService
             errors.Add("Page summary is required.");
         }
 
+        return errors;
+    }
+
+    private static List<string> ValidateUpdateRequest(UpdatePortalPageRequest request)
+    {
+        var errors = new List<string>();
+        if (request.SiteId == Guid.Empty) errors.Add("Site identifier is required.");
+        if (string.IsNullOrWhiteSpace(request.CurrentSlug)) errors.Add("Current page slug is required.");
+        if (string.IsNullOrWhiteSpace(request.Title)) errors.Add("Page title is required.");
+        if (string.IsNullOrWhiteSpace(request.Slug)) errors.Add("Page slug is required.");
+        if (string.IsNullOrWhiteSpace(request.Summary)) errors.Add("Page summary is required.");
+        if (request.Blocks.Count == 0) errors.Add("A page must contain at least one block.");
         return errors;
     }
 }

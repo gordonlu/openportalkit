@@ -14,4 +14,5 @@ public sealed record PortalPage(
     Guid UpdatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    DateTimeOffset? PublishedAt);
+    DateTimeOffset? PublishedAt,
+    int Revision = 1);

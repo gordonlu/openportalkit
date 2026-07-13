@@ -61,13 +61,7 @@ public sealed class IndexModel : PageModel
             string.IsNullOrWhiteSpace(Template.Description) ? "Reusable server-rendered page template." : Template.Description,
             Template.Publish ? PageTemplateStatus.Published : PageTemplateStatus.Draft,
             1,
-            new[]
-            {
-                new BlockInstance(Guid.NewGuid(), "hero", "block.hero.v1", 0,
-                    """{"headline":"Add a page headline","summary":"Use the template workspace to prepare a concise public introduction."}"""),
-                new BlockInstance(Guid.NewGuid(), "rich-text", "block.rich-text.v1", 1,
-                    """{"body":"Add the page's editorial content here."}""")
-            },
+            PageTemplateSeedCatalog.CreateDefaultBlocks(Template.SelectedBlockCodes),
             DevelopmentActorId,
             DevelopmentActorId,
             now,
@@ -82,6 +76,21 @@ public sealed class IndexModel : PageModel
 
             await LoadAsync(cancellationToken);
             return Page();
+        }
+
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostSeedTemplatesAsync(CancellationToken cancellationToken)
+    {
+        var existingCodes = (await _templateStore.ListAsync(cancellationToken))
+            .Select(template => template.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var template in PageTemplateSeedCatalog.CreateInitialTemplates(DevelopmentActorId, now)
+                     .Where(template => !existingCodes.Contains(template.Code)))
+        {
+            await _templateService.SaveAsync(template, DevelopmentActorId, cancellationToken);
         }
 
         return RedirectToPage();
@@ -132,6 +141,7 @@ public sealed class IndexModel : PageModel
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool Publish { get; set; } = true;
+        public IReadOnlyList<string> SelectedBlockCodes { get; set; } = new[] { "hero", "rich-text" };
     }
 
     public sealed class PageInput

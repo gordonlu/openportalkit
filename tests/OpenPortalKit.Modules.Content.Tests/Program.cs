@@ -10,9 +10,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("publish rejects content without summary", PublishRejectsContentWithoutSummary),
     ("publish creates version audit log and outbox message", PublishCreatesVersionAuditLogAndOutboxMessage),
     ("block templates reject unsupported configuration", BlockTemplatesRejectUnsupportedConfiguration),
+    ("block template catalog covers the R9 predefined block set", BlockTemplateCatalogCoversPredefinedBlockSet),
+    ("block template seeds validate against the catalog", BlockTemplateSeedsValidateAgainstCatalog),
     ("block template service versions and audits saved templates", BlockTemplateServiceVersionsAndAuditsSavedTemplates),
     ("block template migration preserves serialized version history", BlockTemplateMigrationPreservesSerializedVersionHistory),
     ("server rendered blocks encode page configuration", ServerRenderedBlocksEncodePageConfiguration),
+    ("server rendered blocks resolve public list and data outputs", ServerRenderedBlocksResolvePublicListAndDataOutputs),
     ("page service fixes template version and audits publication", PageServiceFixesTemplateVersionAndAuditsPublication),
     ("public query hides drafts archived and expired content", PublicQueryHidesDraftsArchivedAndExpiredContent),
     ("public query resolves published detail by slug", PublicQueryResolvesPublishedDetailBySlug)
@@ -99,6 +102,41 @@ static Task BlockTemplatesRejectUnsupportedConfiguration()
     return Task.CompletedTask;
 }
 
+static Task BlockTemplateCatalogCoversPredefinedBlockSet()
+{
+    var catalog = new PredefinedBlockCatalog();
+    var expected = new[]
+    {
+        "hero", "rich-text", "content-list", "announcement-list", "activity-list", "report-list",
+        "data-table", "chart", "link-list", "download-list", "faq", "contact", "embed"
+    };
+
+    Assert.Equal(expected.Length, catalog.List().Count);
+    foreach (var code in expected)
+    {
+        Assert.True(catalog.FindByCode(code) is not null, $"Expected predefined block '{code}'.");
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task BlockTemplateSeedsValidateAgainstCatalog()
+{
+    var catalog = new PredefinedBlockCatalog();
+    var templates = PageTemplateSeedCatalog.CreateInitialTemplates(
+        Guid.NewGuid(),
+        new DateTimeOffset(2026, 7, 10, 12, 0, 0, TimeSpan.Zero));
+
+    Assert.Equal(6, templates.Count);
+    foreach (var template in templates)
+    {
+        var result = PageTemplateValidator.Validate(template, catalog);
+        Assert.True(result.IsValid, $"Expected seed '{template.Code}' to validate: {string.Join("; ", result.Errors)}");
+    }
+
+    return Task.CompletedTask;
+}
+
 static async Task BlockTemplateServiceVersionsAndAuditsSavedTemplates()
 {
     var auditStore = new InMemoryAuditLogStore();
@@ -157,6 +195,14 @@ static Task BlockTemplateMigrationPreservesSerializedVersionHistory()
     Assert.Contains("create table if not exists opk_portal_pages", pageSql);
     Assert.Contains("template_version integer not null", pageSql);
     Assert.Contains("uq_opk_portal_pages_site_slug", pageSql);
+    var pageVersionSql = File.ReadAllText(Path.Combine(
+        "db",
+        "postgresql",
+        "migrations",
+        "0012_portal_page_versions.sql"));
+    Assert.Contains("create table if not exists opk_portal_page_versions", pageVersionSql);
+    Assert.Contains("primary key (page_id, revision)", pageVersionSql);
+    Assert.Contains("snapshot_json jsonb not null", pageVersionSql);
 
     var adminProgram = File.ReadAllText(Path.Combine(
         "src",
@@ -203,6 +249,28 @@ static Task ServerRenderedBlocksEncodePageConfiguration()
     return Task.CompletedTask;
 }
 
+static async Task ServerRenderedBlocksResolvePublicListAndDataOutputs()
+{
+    var siteId = Guid.NewGuid();
+    var store = new InMemoryContentItemStore();
+    await store.AddAsync(CreateContent(siteId, "Public update", "public-update", ContentPublicationStatus.Published, DateTimeOffset.UtcNow.AddMinutes(-1)));
+    var page = new PortalPage(
+        Guid.NewGuid(), siteId, Guid.NewGuid(), 1, "Overview", "overview", "Overview page.",
+        PortalPageStatus.Published,
+        new[]
+        {
+            new BlockInstance(Guid.NewGuid(), "content-list", "block.content-list.v1", 0, """{"heading":"Updates","query":"*","take":5}"""),
+            new BlockInstance(Guid.NewGuid(), "data-table", "block.data-table.v1", 1, """{"heading":"Data","dataSet":"public-data","take":5}""")
+        },
+        Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    var html = await new ServerRenderedBlockPageRenderer(store, new TestPageBlockDataResolver()).RenderBodyAsync(page);
+
+    Assert.Contains("Public update", html);
+    Assert.Contains("A public test dataset.", html);
+    Assert.Contains("Sample value", html);
+}
+
 static async Task PageServiceFixesTemplateVersionAndAuditsPublication()
 {
     var actorId = Guid.NewGuid();
@@ -230,6 +298,7 @@ static async Task PageServiceFixesTemplateVersionAndAuditsPublication()
         pageStore,
         new AuditRecorder(auditStore),
         outboxStore,
+        catalog,
         () => now);
 
     var created = await pageService.CreateFromTemplateAsync(new CreatePageFromTemplateRequest(
@@ -240,20 +309,31 @@ static async Task PageServiceFixesTemplateVersionAndAuditsPublication()
         "A public portal overview.",
         actorId));
     var published = await pageService.PublishAsync(siteId, "portal-overview", actorId);
+    var updated = await pageService.UpdateAsync(new UpdatePortalPageRequest(
+        siteId,
+        "portal-overview",
+        "Portal overview updated",
+        "portal-overview",
+        "An updated public portal overview.",
+        published.Page!.Blocks,
+        actorId));
     var publicPage = await new PublicPageQueryService(pageStore)
         .FindPublishedBySlugAsync(siteId, "portal-overview", now);
     var auditLogs = await auditStore.FindByTargetAsync("PortalPage", created.Page!.Id.ToString("D"));
     var outboxMessages = await outboxStore.GetPendingAsync(10, 3);
+    var versions = await pageStore.ListVersionsAsync(created.Page.Id);
 
     Assert.True(created.Succeeded, "Expected page creation from a published template.");
     Assert.Equal(savedTemplate.Version, created.Page?.TemplateVersion);
     Assert.Equal(PortalPageStatus.Draft, created.Page?.Status);
     Assert.True(created.Page?.Blocks[0].Id != savedTemplate.Blocks[0].Id, "Expected page block IDs to be independent of the template.");
     Assert.Equal(PortalPageStatus.Published, published.Page?.Status);
-    Assert.Equal("portal-overview", publicPage?.Slug);
-    Assert.Equal(2, auditLogs.Count);
-    Assert.Equal("portal-page.published", auditLogs[0].Action);
-    Assert.Equal(1, outboxMessages.Count);
+    Assert.Equal("Portal overview updated", publicPage?.Title);
+    Assert.Equal(3, updated.Page?.Revision);
+    Assert.Equal(3, versions.Count);
+    Assert.Equal(3, auditLogs.Count);
+    Assert.Equal("portal-page.updated", auditLogs[0].Action);
+    Assert.Equal(2, outboxMessages.Count);
     Assert.Equal("PortalPagePublished", outboxMessages[0].EventName);
 }
 
@@ -376,6 +456,23 @@ static ContentItem CreateContent(
         UpdatedBy: actorId,
         CreatedAt: now,
         UpdatedAt: now);
+}
+
+internal sealed class TestPageBlockDataResolver : IPageBlockDataResolver
+{
+    public Task<RenderedPageDataTable?> ResolveDataTableAsync(
+        Guid siteId,
+        string dataSetCode,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<RenderedPageDataTable?>(new RenderedPageDataTable(
+            "Public data",
+            "A public test dataset.",
+            new[] { "Name" },
+            new[] { (IReadOnlyList<string>)new[] { "Sample value" } },
+            "/api/public/datasets/public-data"));
+    }
 }
 
 internal static class Assert

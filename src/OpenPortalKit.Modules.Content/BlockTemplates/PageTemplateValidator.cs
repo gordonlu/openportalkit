@@ -127,6 +127,8 @@ public static class PageTemplateValidator
                     errors.Add($"Block '{block.DefinitionCode}' requires '{setting.Key}'.");
                 }
             }
+
+            ValidateBlockSpecificConfiguration(block, document.RootElement, errors);
         }
         catch (JsonException)
         {
@@ -157,6 +159,8 @@ public static class PageTemplateValidator
             BlockSettingType.Url => value.ValueKind == JsonValueKind.String && IsRelativeOrAbsoluteUrl(value.GetString()),
             BlockSettingType.Number => value.ValueKind == JsonValueKind.Number,
             BlockSettingType.Boolean => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            BlockSettingType.StructuredList => value.ValueKind == JsonValueKind.Array &&
+                value.GetArrayLength() is > 0 and <= 50,
             _ => false
         };
     }
@@ -166,6 +170,83 @@ public static class PageTemplateValidator
         return !string.IsNullOrWhiteSpace(value) &&
             (value.StartsWith("/", StringComparison.Ordinal) ||
              Uri.TryCreate(value, UriKind.Absolute, out _));
+    }
+
+    private static void ValidateBlockSpecificConfiguration(
+        BlockInstance block,
+        JsonElement config,
+        ICollection<string> errors)
+    {
+        if (string.Equals(block.DefinitionCode, "embed", StringComparison.OrdinalIgnoreCase) &&
+            (!config.TryGetProperty("url", out var embedUrl) ||
+             !Uri.TryCreate(embedUrl.GetString(), UriKind.Absolute, out var uri) ||
+             uri.Scheme != Uri.UriSchemeHttps))
+        {
+            errors.Add("Block 'embed' requires an absolute HTTPS URL.");
+        }
+
+        var listProperty = block.DefinitionCode switch
+        {
+            "chart" => "series",
+            "link-list" => "links",
+            "download-list" => "downloads",
+            "faq" => "items",
+            _ => null
+        };
+        if (listProperty is null || !config.TryGetProperty(listProperty, out var items) ||
+            items.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                errors.Add($"Block '{block.DefinitionCode}' list '{listProperty}' must contain objects.");
+                continue;
+            }
+
+            switch (block.DefinitionCode)
+            {
+                case "chart":
+                    RequireText(item, "label", block.DefinitionCode, errors);
+                    if (!item.TryGetProperty("value", out var value) || !value.TryGetDecimal(out var decimalValue) || decimalValue < 0)
+                    {
+                        errors.Add("Block 'chart' series items require a non-negative numeric 'value'.");
+                    }
+                    break;
+                case "link-list":
+                    RequireText(item, "label", block.DefinitionCode, errors);
+                    RequireUrl(item, "url", block.DefinitionCode, errors);
+                    break;
+                case "download-list":
+                    RequireText(item, "label", block.DefinitionCode, errors);
+                    RequireUrl(item, "url", block.DefinitionCode, errors);
+                    break;
+                case "faq":
+                    RequireText(item, "question", block.DefinitionCode, errors);
+                    RequireText(item, "answer", block.DefinitionCode, errors);
+                    break;
+            }
+        }
+    }
+
+    private static void RequireText(JsonElement item, string property, string blockCode, ICollection<string> errors)
+    {
+        if (!item.TryGetProperty(property, out var value) || IsEmpty(value) || value.ValueKind != JsonValueKind.String)
+        {
+            errors.Add($"Block '{blockCode}' list items require text '{property}'.");
+        }
+    }
+
+    private static void RequireUrl(JsonElement item, string property, string blockCode, ICollection<string> errors)
+    {
+        if (!item.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String ||
+            !IsRelativeOrAbsoluteUrl(value.GetString()))
+        {
+            errors.Add($"Block '{blockCode}' list items require a relative or absolute URL '{property}'.");
+        }
     }
 
     private static string Describe(BlockSettingType type)
@@ -179,6 +260,7 @@ public static class PageTemplateValidator
             BlockSettingType.Boolean => "a boolean",
             BlockSettingType.ContentQuery => "a content query string",
             BlockSettingType.DataSetReference => "a dataset reference string",
+            BlockSettingType.StructuredList => "a non-empty list with at most 50 items",
             _ => "a valid value"
         };
     }

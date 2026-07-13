@@ -4,6 +4,7 @@ public sealed class InMemoryPageStore : IPageStore
 {
     private readonly object _gate = new();
     private readonly List<PortalPage> _pages = new();
+    private readonly List<PortalPageVersion> _versions = new();
 
     public Task<PortalPage> UpsertAsync(PortalPage page, CancellationToken cancellationToken = default)
     {
@@ -20,6 +21,11 @@ public sealed class InMemoryPageStore : IPageStore
             else
             {
                 _pages.Add(page);
+            }
+
+            if (_versions.All(version => version.PageId != page.Id || version.Revision != page.Revision))
+            {
+                _versions.Add(new PortalPageVersion(page.Id, page.Revision, page, page.UpdatedBy, page.UpdatedAt));
             }
         }
 
@@ -47,6 +53,20 @@ public sealed class InMemoryPageStore : IPageStore
             return Task.FromResult<IReadOnlyList<PortalPage>>(_pages
                 .Where(page => siteId is null || page.SiteId == siteId)
                 .OrderBy(page => page.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+        }
+    }
+
+    public Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
+        Guid pageId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<PortalPageVersion>>(_versions
+                .Where(version => version.PageId == pageId)
+                .OrderByDescending(version => version.Revision)
                 .ToArray());
         }
     }

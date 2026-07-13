@@ -26,6 +26,7 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R8 durable publishing delivery migration in `db/postgresql/migrations/0009_publishing_delivery.sql`, including JobHost processing, lease-based outbox claims, revalidation records, and audit history
 - R9 versioned block template migration in `db/postgresql/migrations/0010_block_templates.sql`
 - R9 portal page migration in `db/postgresql/migrations/0011_portal_pages.sql`
+- R9 immutable portal page revision migration in `db/postgresql/migrations/0012_portal_page_versions.sql`
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs

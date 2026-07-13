@@ -4,6 +4,7 @@ using OpenPortalKit.Kernel.Configuration;
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
+using OpenPortalKit.AdminHost;
 using OpenPortalKit.AdminHost.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
@@ -131,6 +132,8 @@ else
 }
 
 builder.Services.AddSingleton<PortalPageService>();
+builder.Services.AddSingleton<IPageBlockDataResolver, AdminPageBlockDataResolver>();
+builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
 if (agentOutputPostgres.Enabled)
 {
     builder.Services.AddSingleton<IAgentOutputDbConnectionFactory, AgentOutputPostgresConnectionFactory>();

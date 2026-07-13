@@ -91,6 +91,10 @@ builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
 builder.Services.AddSingleton<ApiAnalyticsCaptureQueue>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ApiAnalyticsCaptureQueue>());
 builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore());
+builder.Services.AddSingleton(_ => BuildSampleDataContextAsync().GetAwaiter().GetResult());
+builder.Services.AddSingleton<IDataSetStore>(provider => provider.GetRequiredService<SampleDataContext>().DataSetStore);
+builder.Services.AddSingleton<IDataRecordStore>(provider => provider.GetRequiredService<SampleDataContext>().RecordStore);
+builder.Services.AddSingleton<IPageBlockDataResolver, ApiPublicPageBlockDataResolver>();
 if (persistencePostgres.Enabled)
 {
     builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
@@ -381,7 +385,7 @@ app.MapGet("/pages/{slug}", async (
     }
 
     var canonicalUrl = CanonicalUrlBuilder.Build(GetSiteBaseUrl(request), "/pages/" + page.Slug);
-    var html = BuildPublicPageHtml(page, canonicalUrl, renderer.RenderBody(page));
+    var html = BuildPublicPageHtml(page, canonicalUrl, await renderer.RenderBodyAsync(page));
     return Results.Content(html, "text/html; charset=utf-8");
 });
 
@@ -396,7 +400,7 @@ app.MapGet("/pages/{slug}.md", async (
     return page is null
         ? Results.NotFound()
         : Results.Text(AgentSnapshotGenerator.GenerateMarkdown(
-            BuildAgentPageDocument(page, GetSiteBaseUrl(request), renderer)), "text/markdown; charset=utf-8");
+            await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "text/markdown; charset=utf-8");
 });
 
 app.MapGet("/api/public/pages/{slug}.json", async (
@@ -410,7 +414,7 @@ app.MapGet("/api/public/pages/{slug}.json", async (
     return page is null
         ? Results.NotFound()
         : Results.Text(AgentSnapshotGenerator.GenerateJson(
-            BuildAgentPageDocument(page, GetSiteBaseUrl(request), renderer)), "application/json; charset=utf-8");
+            await BuildAgentPageDocumentAsync(page, GetSiteBaseUrl(request), renderer)), "application/json; charset=utf-8");
 });
 
 app.MapGet("/api/public/content/sample/metadata", (HttpRequest request) =>
@@ -776,7 +780,19 @@ static IPageStore BuildSeedPageStore()
                 "rich-text",
                 "block.rich-text.v1",
                 1,
-                """{"body":"Templates use predefined blocks with explicit schemas.\nEach page fixes the template version used to create it, preserving traceability for editorial and public output changes."}""")
+                """{"body":"Templates use predefined blocks with explicit schemas.\nEach page fixes the template version used to create it, preserving traceability for editorial and public output changes."}"""),
+            new BlockInstance(
+                Guid.Parse("a1000000-0000-0000-0000-000000000006"),
+                "content-list",
+                "block.content-list.v1",
+                2,
+                """{"heading":"Latest publishing notes","query":"*","take":3}"""),
+            new BlockInstance(
+                Guid.Parse("a1000000-0000-0000-0000-000000000007"),
+                "data-table",
+                "block.data-table.v1",
+                3,
+                """{"heading":"Sample public data","dataSet":"sample-catalog","take":10}""")
         },
         Guid.Parse("a1000000-0000-0000-0000-000000000005"),
         Guid.Parse("a1000000-0000-0000-0000-000000000005"),
@@ -879,11 +895,54 @@ static string BuildPublicPageHtml(PortalPage page, Uri canonicalUrl, string body
             <title>{encoder.Encode(page.Title)}</title>
             <meta name="description" content="{encoder.Encode(page.Summary)}">
             <link rel="canonical" href="{encoder.Encode(canonicalUrl.ToString())}">
+            <style>{BuildPublicPageStyles()}</style>
         </head>
         <body>
+            <header class="opk-public-header"><div>OpenPortalKit</div></header>
             <main>{body}</main>
+            <footer class="opk-public-footer"><div>Published from a versioned OpenPortalKit page template.</div></footer>
         </body>
         </html>
+        """;
+}
+
+static string BuildPublicPageStyles()
+{
+    return """
+        :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1b2533; background: #f4f7f8; }
+        * { box-sizing: border-box; }
+        body { margin: 0; line-height: 1.55; }
+        .opk-public-header { border-bottom: 1px solid #d9e1e6; background: #ffffff; }
+        .opk-public-header div, main, .opk-public-footer div { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+        .opk-public-header div { display: flex; align-items: center; min-height: 62px; font-size: 1rem; font-weight: 750; }
+        main { padding: 28px 0 56px; }
+        section { margin: 0; padding: 30px 28px; border-top: 1px solid #d9e1e6; }
+        h1, h2, p { margin-top: 0; }
+        h1 { max-width: 760px; margin-bottom: 12px; font-size: clamp(2rem, 5vw, 3.35rem); line-height: 1.08; }
+        h2 { margin-bottom: 14px; font-size: 1.25rem; }
+        .opk-page-hero { margin-bottom: 8px; border-top: 4px solid #0f766e; background: #e9f7f4; }
+        .opk-page-hero p { max-width: 680px; color: #405363; font-size: 1.1rem; }
+        a { color: #075f5a; font-weight: 650; }
+        .opk-page-hero a { display: inline-block; padding: 9px 13px; background: #0f766e; color: #ffffff; text-decoration: none; }
+        .opk-page-list ul, .opk-page-link-list ul, .opk-page-download-list ul, .opk-page-chart ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+        .opk-page-list li { padding-bottom: 12px; border-bottom: 1px solid #e4eaed; }
+        .opk-page-list li:last-child { padding-bottom: 0; border-bottom: 0; }
+        .opk-page-list p, .opk-page-download-list p { margin: 4px 0; color: #526575; }
+        time { color: #647785; font-size: .85rem; }
+        .opk-page-table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #d9e1e6; text-align: left; vertical-align: top; }
+        th { color: #405363; background: #eef4f5; font-weight: 750; white-space: nowrap; }
+        .opk-page-data-source { display: inline-block; margin-top: 14px; }
+        .opk-page-chart li { display: grid; grid-template-columns: minmax(120px, .4fr) minmax(120px, 1fr) auto; gap: 12px; align-items: center; }
+        meter { width: 100%; accent-color: #0f766e; }
+        details { padding: 12px 0; border-bottom: 1px solid #e4eaed; }
+        details:last-child { border-bottom: 0; }
+        summary { cursor: pointer; font-weight: 700; }
+        address { display: grid; gap: 5px; font-style: normal; }
+        iframe { width: 100%; min-height: 420px; border: 1px solid #d9e1e6; }
+        .opk-public-footer { padding: 24px 0; border-top: 1px solid #d9e1e6; color: #526575; font-size: .9rem; }
+        @media (max-width: 640px) { .opk-public-header div, main, .opk-public-footer div { width: min(100% - 28px, 1120px); } main { padding-top: 14px; } section { padding: 20px; } .opk-page-chart li { grid-template-columns: 1fr; gap: 5px; } iframe { min-height: 300px; } }
         """;
 }
 
@@ -909,18 +968,21 @@ static async Task<IReadOnlyList<AgentContentDocument>> GetAgentContentDocumentsA
     if (pageStore is not null && pageRenderer is not null)
     {
         var pages = await new PublicPageQueryService(pageStore).ListPublishedAsync(GetDefaultSiteId());
-        documents.AddRange(pages.Select(page => BuildAgentPageDocument(page, siteBaseUrl, pageRenderer)));
+        foreach (var page in pages)
+        {
+            documents.Add(await BuildAgentPageDocumentAsync(page, siteBaseUrl, pageRenderer));
+        }
     }
 
     return documents;
 }
 
-static AgentContentDocument BuildAgentPageDocument(
+static async Task<AgentContentDocument> BuildAgentPageDocumentAsync(
     PortalPage page,
     Uri siteBaseUrl,
     ServerRenderedBlockPageRenderer renderer)
 {
-    var text = System.Text.RegularExpressions.Regex.Replace(renderer.RenderBody(page), "<[^>]+>", " ");
+    var text = System.Text.RegularExpressions.Regex.Replace(await renderer.RenderBodyAsync(page), "<[^>]+>", " ");
     text = System.Net.WebUtility.HtmlDecode(text).Trim();
 
     return new AgentContentDocument(
@@ -1101,7 +1163,7 @@ static IReadOnlyList<DataSet> GetSampleDataSets()
     {
         new DataSet(
             Guid.Parse("66666666-6666-6666-6666-666666666666"),
-            Guid.Parse("77777777-7777-7777-7777-777777777777"),
+            GetDefaultSiteId(),
             "sample-catalog",
             "Sample Catalog",
             "A generic structured dataset sample with traceable public records.",
