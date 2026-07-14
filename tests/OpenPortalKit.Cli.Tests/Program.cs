@@ -8,6 +8,7 @@ using OpenPortalKit.Cli.Checks;
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("CLI exposes stable help and usage errors", CliExposesStableHelpAndUsageErrors),
+    ("branding contract validates assets and blocks unsafe configuration", BrandingContractIsStrict),
     ("repository boundary check passes the product tree", RepositoryBoundaryCheckPasses),
     ("boundary check detects industry leakage", BoundaryCheckDetectsIndustryLeakage),
     ("repository AgentSEO contract is complete", RepositoryAgentContractIsComplete),
@@ -52,7 +53,58 @@ static async Task CliExposesStableHelpAndUsageErrors()
     Assert(output.ToString().Contains("opk new", StringComparison.Ordinal), "Help omitted project scaffolding.");
     Assert(output.ToString().Contains("opk module add", StringComparison.Ordinal), "Help omitted module scaffolding.");
     Assert(output.ToString().Contains("opk upgrade inspect", StringComparison.Ordinal), "Help omitted upgrade inspection.");
+    Assert(output.ToString().Contains("opk branding validate", StringComparison.Ordinal), "Help omitted branding validation.");
     Assert(await application.RunAsync(["unknown"]) == 2, "Unknown commands should return usage exit code 2.");
+}
+
+static async Task BrandingContractIsStrict()
+{
+    var repository = FindRepositoryRoot();
+    var validator = new OpenPortalKit.Cli.Authoring.BrandingManifestValidator();
+    var repositoryResult = await validator.ValidateAsync(repository);
+    Assert(repositoryResult.Succeeded,
+        string.Join("; ", repositoryResult.Errors.Select(item => item.Code + ": " + item.Message)));
+
+    var root = CreateTestDirectory();
+    try
+    {
+        var lib = Path.Combine(root, "apps", "web", "src", "lib");
+        var app = Path.Combine(root, "apps", "web", "src", "app");
+        var examples = Path.Combine(root, "apps", "web", "public", "examples");
+        Directory.CreateDirectory(lib);
+        Directory.CreateDirectory(app);
+        Directory.CreateDirectory(examples);
+        await File.WriteAllTextAsync(Path.Combine(root, "OpenPortalKit.sln"), "branding test workspace");
+        var sourceManifest = Path.Combine(repository, "apps", "web", "src", "lib", "branding.json");
+        var manifestPath = Path.Combine(lib, "branding.json");
+        File.Copy(sourceManifest, manifestPath);
+        File.Copy(Path.Combine(repository, "apps", "web", "src", "app", "favicon.ico"), Path.Combine(app, "favicon.ico"));
+        File.Copy(Path.Combine(repository, "apps", "web", "public", "examples", "corporate.webp"), Path.Combine(examples, "corporate.webp"));
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var application = new CliApplication(output, error);
+        Assert(await application.RunAsync(["branding", "validate", "--root", root, "--format", "json"]) == 0,
+            output + error.ToString());
+
+        var valid = await File.ReadAllTextAsync(manifestPath);
+        await File.WriteAllTextAsync(manifestPath, valid.Replace("#publications", "javascript:alert(1)", StringComparison.Ordinal));
+        output.GetStringBuilder().Clear();
+        Assert(await application.RunAsync(["branding", "validate", "--root", root]) == 1,
+            "Unsafe navigation should fail branding validation.");
+        Assert(output.ToString().Contains("link_unsafe", StringComparison.Ordinal), "Unsafe link failure was not reported.");
+
+        await File.WriteAllTextAsync(manifestPath, valid
+            .Replace("\"accent\": \"#087c78\"", "\"accent\": \"#ffffff\"", StringComparison.Ordinal)
+            .Replace("\"width\": 1920", "\"width\": 1919", StringComparison.Ordinal));
+        var result = await validator.ValidateAsync(root);
+        Assert(result.Errors.Any(item => item.Code == "contrast_insufficient"), "Low contrast was not rejected.");
+        Assert(result.Errors.Any(item => item.Code == "asset_dimensions_mismatch"), "False asset dimensions were not rejected.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
 }
 
 static Task RepositoryBoundaryCheckPasses()
@@ -282,6 +334,18 @@ static async Task CliCreatesTraceableSourceWorkspace()
             "Generated Web profile is incorrect.");
         Assert(profile.RootElement.GetProperty("profileTemplate").GetProperty("version").GetString() == "1.0.0",
             "Generated Web profile provenance is missing.");
+        using var branding = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(outputPath, "apps", "web", "src", "lib", "branding.json")));
+        Assert(branding.RootElement.GetProperty("schemaVersion").GetString() == "opk.branding.v1",
+            "Generated branding schema is missing.");
+        Assert(branding.RootElement.GetProperty("site").GetProperty("name").GetString() == "Atlas Investor Information",
+            "Generated branding identity is incorrect.");
+        Assert(branding.RootElement.GetProperty("site").GetProperty("shortName").GetString() == "AII",
+            "Generated branding fallback mark is incorrect.");
+        Assert(branding.RootElement.GetProperty("typography").GetProperty("preset").GetString() == "institutional",
+            "Generated profile typography is incorrect.");
+        Assert(branding.RootElement.GetProperty("assets").GetProperty("socialImage").GetProperty("src").GetString() == "/examples/finance.webp",
+            "Generated profile social asset is incorrect.");
         Assert(await application.RunAsync([
             "new", "--name", "Duplicate", "--output", outputPath, "--source", source
         ]) == 2, "Existing output should not be overwritten.");

@@ -159,7 +159,7 @@ public sealed class PostgresPageStore : IPageStore
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = SelectBase + """
+        command.CommandText = SelectBase + "\n" + """
             where site_id = @site_id
               and status = 'Published'
               and published_at <= @as_of
@@ -168,6 +168,34 @@ public sealed class PostgresPageStore : IPageStore
         command.AddParameter("@site_id", siteId, DbType.Guid);
         command.AddParameter("@as_of", asOf, DbType.DateTimeOffset);
 
+        var pages = new List<PortalPage>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) pages.Add(ReadPage(reader));
+        return pages;
+    }
+
+    public async Task<IReadOnlyList<PortalPage>> ListPublishedPageAsync(
+        Guid siteId,
+        DateTimeOffset asOf,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(skip);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(take);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectBase + "\n" + """
+            where site_id = @site_id
+              and status = 'Published'
+              and published_at <= @as_of
+            order by published_at desc, id asc
+            offset @skip limit @take
+            """;
+        command.AddParameter("@site_id", siteId, DbType.Guid);
+        command.AddParameter("@as_of", asOf, DbType.DateTimeOffset);
+        command.AddParameter("@skip", skip, DbType.Int32);
+        command.AddParameter("@take", take, DbType.Int32);
         var pages = new List<PortalPage>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) pages.Add(ReadPage(reader));

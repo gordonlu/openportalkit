@@ -63,3 +63,7 @@ the published page. R14 does not introduce a second or unaudited publishing path
 R14 does not create industry-specific content entities, a CRM, a general BPM engine, a drag-anything page builder,
 or an unaudited remote publishing API. Data and asset authoring remain explicit follow-on integrations after the
 content workflow is complete.
+
+R14 publishes through ApiHost-compatible public contracts; it does not make the fixture-backed Next.js examples a
+live CMS client. That public runtime integration, controlled branding/asset contract, and Windows customer handoff
+are planned under R15 and documented in `deployment.md`.

@@ -116,25 +116,23 @@ builder.Services.AddSingleton<AnalyticsEventFactory>(provider =>
     new AnalyticsEventFactory(provider.GetRequiredService<IOptions<AnalyticsPrivacyOptions>>().Value));
 builder.Services.AddSingleton<ApiAnalyticsCaptureQueue>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ApiAnalyticsCaptureQueue>());
-builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore());
-builder.Services.AddSingleton(_ => BuildSampleDataContextAsync().GetAwaiter().GetResult());
-builder.Services.AddSingleton<IDataSetStore>(provider => provider.GetRequiredService<SampleDataContext>().DataSetStore);
-builder.Services.AddSingleton<IDataRecordStore>(provider => provider.GetRequiredService<SampleDataContext>().RecordStore);
-builder.Services.AddSingleton<ISearchIndex>(provider =>
-    BuildSampleSearchIndexAsync(
-        provider.GetRequiredService<IContentItemStore>(),
-        provider.GetRequiredService<SampleDataContext>()).GetAwaiter().GetResult());
 builder.Services.AddSingleton<IPageBlockDataResolver, ApiPublicPageBlockDataResolver>();
 if (persistencePostgres.Enabled)
 {
     builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
+    builder.Services.AddSingleton<IContentItemStore, PostgresContentItemStore>();
     builder.Services.AddSingleton<IPageStore, PostgresPageStore>();
+    builder.Services.AddSingleton<IDataSetStore, PostgresDataSetStore>();
+    builder.Services.AddSingleton<IDataRecordStore, PostgresDataRecordStore>();
 }
 else
 {
+    builder.Services.AddSingleton<IContentItemStore>(_ => BuildSeedContentItemStore());
     builder.Services.AddSingleton<IPageStore>(_ => BuildSeedPageStore());
+    builder.Services.AddSingleton(_ => BuildSampleDataContextAsync().GetAwaiter().GetResult());
+    builder.Services.AddSingleton<IDataSetStore>(provider => provider.GetRequiredService<SampleDataContext>().DataSetStore);
+    builder.Services.AddSingleton<IDataRecordStore>(provider => provider.GetRequiredService<SampleDataContext>().RecordStore);
 }
-
 builder.Services.AddSingleton<ServerRenderedBlockPageRenderer>();
 
 var app = builder.Build();
@@ -429,6 +427,32 @@ app.MapGet("/api/public/content", async (
     return Results.Ok(new PublicPage<object>(items, offset, limit, documents.Count > limit));
 });
 
+app.MapGet("/api/public/pages", async (
+    HttpRequest request,
+    IPageStore pageStore,
+    int offset = 0,
+    int limit = 20) =>
+{
+    if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
+    var siteBaseUrl = GetSiteBaseUrl(request);
+    var pages = await new PublicPageQueryService(pageStore)
+        .ListPublishedPageAsync(GetDefaultSiteId(), offset, limit + 1);
+    var items = pages.Take(limit).Select(page => new
+    {
+        page.Id,
+        page.Title,
+        page.Slug,
+        page.Summary,
+        CanonicalUrl = new Uri(siteBaseUrl, "/pages/" + page.Slug),
+        MarkdownSnapshot = new Uri(siteBaseUrl, "/pages/" + page.Slug + ".md"),
+        JsonSnapshot = new Uri(siteBaseUrl, "/api/public/pages/" + page.Slug + ".json"),
+        page.PublishedAt,
+        page.UpdatedAt,
+        page.Revision
+    }).ToArray();
+    return Results.Ok(new PublicPage<object>(items, offset, limit, pages.Count > limit));
+});
+
 app.MapGet("/content/{slug}", async (string slug, HttpRequest request, IContentItemStore contentStore) =>
 {
     var siteBaseUrl = GetSiteBaseUrl(request);
@@ -543,15 +567,18 @@ app.MapGet("/api/public/redirects/resolve", async (string path) =>
     return resolution is null ? Results.NotFound() : Results.Ok(resolution);
 });
 
-app.MapGet("/api/public/datasets", () => GetSampleDataSets().Select(dataSet => new PublicDataSetSummary(
-    dataSet.Code,
-    dataSet.Name,
-    dataSet.Description)));
+app.MapGet("/api/public/datasets", async (IDataSetStore dataSetStore, IDataRecordStore recordStore) =>
+    Results.Ok(await new PublicDataSetQueryService(dataSetStore, recordStore)
+        .ListPublicAsync(GetDefaultSiteId())));
 
-app.MapGet("/api/public/datasets/{code}", async (string code, HttpRequest request, SampleDataContext sample) =>
+app.MapGet("/api/public/datasets/{code}", async (
+    string code,
+    HttpRequest request,
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore) =>
 {
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var detail = await query.FindByCodeAsync(sample.SiteId, code);
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var detail = await query.FindByCodeAsync(GetDefaultSiteId(), code);
     if (detail is null) return Results.NotFound();
     var updatedAt = detail.Records.Count == 0 ? DateTimeOffset.UnixEpoch : detail.Records.Max(record => record.UpdatedAt);
     var version = "dataset:" + detail.Code + ":" + string.Join(':', detail.Records.Select(record => record.Checksum));
@@ -563,13 +590,14 @@ app.MapGet("/api/public/datasets/{code}", async (string code, HttpRequest reques
 app.MapGet("/api/public/datasets/{code}/records", async (
     string code,
     HttpRequest request,
-    SampleDataContext sample,
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore,
     int offset = 0,
     int limit = 50) =>
 {
     if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var detail = await query.FindByCodeAsync(sample.SiteId, code);
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var detail = await query.FindByCodeAsync(GetDefaultSiteId(), code);
 
     if (detail is null) return Results.NotFound();
     var records = detail.Records.Skip(offset).Take(limit + 1).ToArray();
@@ -584,10 +612,11 @@ app.MapGet("/api/public/datasets/{code}/records", async (
 app.MapGet("/api/public/datasets/{code}/schema", async (
     string code,
     HttpRequest request,
-    SampleDataContext sample) =>
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore) =>
 {
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var schema = await query.FindSchemaByCodeAsync(sample.SiteId, code);
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var schema = await query.FindSchemaByCodeAsync(GetDefaultSiteId(), code);
 
     if (schema is null) return Results.NotFound();
     if (ApplyConditionalHeaders(request, $"dataset-schema:{schema.DataSetCode}:{schema.Checksum}", schema.CreatedAt))
@@ -599,10 +628,11 @@ app.MapGet("/api/public/datasets/{code}/records/{recordKey}", async (
     string code,
     string recordKey,
     HttpRequest request,
-    SampleDataContext sample) =>
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore) =>
 {
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var record = await query.FindRecordByKeyAsync(sample.SiteId, code, recordKey);
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var record = await query.FindRecordByKeyAsync(GetDefaultSiteId(), code, recordKey);
 
     if (record is null) return Results.NotFound();
     if (ApplyConditionalHeaders(request, $"dataset-record:{code}:{record.RecordKey}:{record.Checksum}", record.UpdatedAt))
@@ -613,10 +643,11 @@ app.MapGet("/api/public/datasets/{code}/records/{recordKey}", async (
 app.MapGet("/api/public/datasets/{code}/export.csv", async (
     string code,
     HttpRequest request,
-    SampleDataContext sample) =>
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore) =>
 {
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var detail = await query.FindByCodeAsync(sample.SiteId, code);
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var detail = await query.FindByCodeAsync(GetDefaultSiteId(), code);
 
     if (detail is null) return Results.NotFound();
     var updatedAt = detail.Records.Count == 0 ? DateTimeOffset.UnixEpoch : detail.Records.Max(record => record.UpdatedAt);
@@ -628,16 +659,22 @@ app.MapGet("/api/public/datasets/{code}/export.csv", async (
 
 app.MapGet("/api/public/search", async (
     string q,
-    ISearchIndex index,
+    IContentItemStore contentStore,
+    IPageStore pageStore,
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore,
     int offset = 0,
-    int limit = 20) =>
+    int limit = 20,
+    CancellationToken cancellationToken = default) =>
 {
     if (!TryValidatePage(offset, limit, out var pageError)) return pageError;
     if (string.IsNullOrWhiteSpace(q) || q.Length > 200)
     {
         return Results.BadRequest(new { Error = "q must contain between 1 and 200 characters." });
     }
-    var results = await index.SearchAsync(new SearchQuery(q, Limit: limit + 1, Offset: offset));
+    var index = await BuildSearchIndexAsync(contentStore, pageStore, dataSetStore, recordStore, cancellationToken);
+    var results = await index.SearchAsync(
+        new SearchQuery(q, Limit: limit + 1, Offset: offset), cancellationToken);
 
     var items = results.Take(limit).Select(result => new
     {
@@ -652,9 +689,15 @@ app.MapGet("/api/public/search", async (
     return Results.Ok(new PublicPage<object>(items, offset, limit, results.Count > limit));
 });
 
-app.MapGet("/api/public/search/health", async (ISearchIndex index) =>
+app.MapGet("/api/public/search/health", async (
+    IContentItemStore contentStore,
+    IPageStore pageStore,
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore,
+    CancellationToken cancellationToken) =>
 {
-    var results = await index.SearchAsync(new SearchQuery("sample"));
+    var index = await BuildSearchIndexAsync(contentStore, pageStore, dataSetStore, recordStore, cancellationToken);
+    var results = await index.SearchAsync(new SearchQuery("sample"), cancellationToken);
 
     return new
     {
@@ -1445,57 +1488,69 @@ static async Task<SampleDataContext> BuildSampleDataContextAsync()
     return new SampleDataContext(dataSet.SiteId, dataSetStore, recordStore);
 }
 
-static async Task<ISearchIndex> BuildSampleSearchIndexAsync(
+static async Task<ISearchIndex> BuildSearchIndexAsync(
     IContentItemStore contentStore,
-    SampleDataContext sample)
+    IPageStore pageStore,
+    IDataSetStore dataSetStore,
+    IDataRecordStore recordStore,
+    CancellationToken cancellationToken = default)
 {
+    const int batchSize = 100;
+    const int maximumDocumentsPerType = 1_000;
     var index = new InMemorySearchIndex();
     var siteBase = new Uri("https://example.test");
-    var samplePublishedAt = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero);
     var publicContent = new PublicContentQueryService(contentStore);
-    var contentItems = await publicContent.ListPublishedAsync(new ContentListQuery(SiteId: GetDefaultSiteId()));
-
-    foreach (var item in contentItems)
+    for (var skip = 0; skip < maximumDocumentsPerType; skip += batchSize)
     {
-        await index.UpsertAsync(new SearchDocument(
-            "content:" + item.Slug,
-            "ContentItem",
-            item.Id.ToString(),
-            item.Title,
-            item.Summary,
-            item.Summary,
-            CanonicalUrlBuilder.Build(siteBase, "/content/" + item.Slug).PathAndQuery,
-            "content",
-            item.Tags,
-            Category: null,
-            item.PublishedAt,
-            item.UpdatedAt,
-            SearchVisibility.Public,
-            "en-US",
-            MetadataJson: null));
+        var contentItems = await publicContent.ListPublishedAsync(
+            new ContentListQuery(SiteId: GetDefaultSiteId(), Skip: skip, Take: batchSize),
+            cancellationToken: cancellationToken);
+        foreach (var item in contentItems)
+        {
+            await index.UpsertAsync(new SearchDocument(
+                "content:" + item.Slug, "ContentItem", item.Id.ToString(), item.Title, item.Summary, item.Summary,
+                CanonicalUrlBuilder.Build(siteBase, "/content/" + item.Slug).PathAndQuery,
+                "content", item.Tags, Category: null, item.PublishedAt, item.UpdatedAt,
+                SearchVisibility.Public, "en-US", MetadataJson: null), cancellationToken);
+        }
+        if (contentItems.Count < batchSize) break;
     }
 
-    var query = new PublicDataSetQueryService(sample.DataSetStore, sample.RecordStore);
-    var dataSet = await query.FindByCodeAsync(sample.SiteId, "sample-catalog");
+    var publicPages = new PublicPageQueryService(pageStore);
+    for (var skip = 0; skip < maximumDocumentsPerType; skip += batchSize)
+    {
+        var pages = await publicPages.ListPublishedPageAsync(
+            GetDefaultSiteId(), skip, batchSize, cancellationToken: cancellationToken);
+        foreach (var page in pages)
+        {
+            await index.UpsertAsync(new SearchDocument(
+                "page:" + page.Slug, "PortalPage", page.Id.ToString(), page.Title, page.Summary, page.Summary,
+                "/pages/" + page.Slug, "page", Array.Empty<string>(), Category: null, page.PublishedAt,
+                page.UpdatedAt, SearchVisibility.Public, "en-US", MetadataJson: null), cancellationToken);
+        }
+        if (pages.Count < batchSize) break;
+    }
 
-    if (dataSet is not null)
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var dataSets = await query.ListPublicAsync(GetDefaultSiteId(), cancellationToken);
+    foreach (var summary in dataSets)
     {
         await index.UpsertAsync(new SearchDocument(
-            "dataset:" + dataSet.Code,
+            "dataset:" + summary.Code,
             "DataSet",
-            dataSet.Code,
-            dataSet.Name,
-            dataSet.Description,
-            string.Join(' ', dataSet.Records.Select(record => record.PayloadJson)),
-            "/api/public/datasets/" + dataSet.Code,
+            summary.Code,
+            summary.Name,
+            summary.Description,
+            summary.Description,
+            "/api/public/datasets/" + summary.Code,
             "dataset",
-            new[] { "sample", "data" },
+            new[] { "dataset", summary.Code },
             Category: null,
-            PublishedAt: samplePublishedAt,
-            UpdatedAt: dataSet.Records.Count > 0 ? dataSet.Records.Max(record => record.UpdatedAt) : DateTimeOffset.UtcNow,
+            PublishedAt: summary.UpdatedAt,
+            UpdatedAt: summary.UpdatedAt,
             SearchVisibility.Public,
             Language: null,
-            MetadataJson: null));
+            MetadataJson: null), cancellationToken);
     }
 
     return index;

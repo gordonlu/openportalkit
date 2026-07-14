@@ -73,9 +73,40 @@ static async Task ApiHostPreservesPublicAndSecurityContracts()
     Assert.Equal(HttpStatusCode.BadRequest, invalidPage.StatusCode);
     Assert.Header(invalidPage, "X-OpenPortalKit-Contract-Version", "1.0.0");
 
+    using var pageList = await client.GetAsync("api/public/pages?limit=1");
+    Assert.Equal(HttpStatusCode.OK, pageList.StatusCode);
+    Assert.Header(pageList, "X-OpenPortalKit-Contract-Version", "1.0.0");
+    using (var pageDocument = JsonDocument.Parse(await pageList.Content.ReadAsStringAsync()))
+    {
+        var publicPage = pageDocument.RootElement.GetProperty("items")[0];
+        Assert.True(publicPage.TryGetProperty("canonicalUrl", out _), "Public page summary omitted canonical URL.");
+        Assert.True(publicPage.TryGetProperty("markdownSnapshot", out _), "Public page summary omitted Markdown URL.");
+        Assert.False(publicPage.TryGetProperty("blocks", out _), "Public page summary leaked block configuration.");
+        Assert.False(publicPage.TryGetProperty("updatedBy", out _), "Public page summary leaked an actor identifier.");
+    }
+
     using var unsafeMethod = await client.PostAsync("api/public/content", new StringContent("{}"));
     Assert.Equal(HttpStatusCode.MethodNotAllowed, unsafeMethod.StatusCode);
     Assert.Header(unsafeMethod, "X-OpenPortalKit-Contract-Version", "1.0.0");
+
+    using var dataSets = await client.GetAsync("api/public/datasets");
+    Assert.Equal(HttpStatusCode.OK, dataSets.StatusCode);
+    using (var dataSetDocument = JsonDocument.Parse(await dataSets.Content.ReadAsStringAsync()))
+    {
+        var dataSet = dataSetDocument.RootElement[0];
+        Assert.Equal("sample-catalog", dataSet.GetProperty("code").GetString());
+        Assert.True(dataSet.TryGetProperty("updatedAt", out _), "Public dataset summary omitted freshness metadata.");
+    }
+
+    using var search = await client.GetAsync("api/public/search?q=Public%20Pages");
+    Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+    using (var searchDocument = JsonDocument.Parse(await search.Content.ReadAsStringAsync()))
+    {
+        var pageResult = searchDocument.RootElement.GetProperty("items").EnumerateArray()
+            .Single(item => item.GetProperty("targetType").GetString() == "PortalPage");
+        Assert.Equal("OpenPortalKit Public Pages", pageResult.GetProperty("title").GetString());
+        Assert.Equal("/pages/public-pages", pageResult.GetProperty("url").GetString());
+    }
 
     using var traceRequest = new HttpRequestMessage(HttpMethod.Get, "health/live");
     traceRequest.Headers.TryAddWithoutValidation("X-Trace-Id", "integration-trace-1234");

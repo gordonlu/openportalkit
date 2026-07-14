@@ -1,11 +1,13 @@
 import projectProfile from "./project-profile.json";
 
 export type ExamplePublication = {
+  id?: string;
   title: string;
   category: string;
   date: string;
   freshness: string;
-  format: "Article" | "Dataset" | "Event" | "Report";
+  format: "Article" | "Dataset" | "Event" | "Page" | "Report";
+  href?: string;
 };
 
 export type ExampleSite = {

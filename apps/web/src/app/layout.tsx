@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import { branding } from "@/lib/branding";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenPortalKit Examples",
-  description: "Runnable enterprise portal examples built with OpenPortalKit.",
+  title: branding.site.name,
+  description: branding.site.description,
+  icons: { icon: branding.assets.favicon.src },
 };
 
 export default function RootLayout({
@@ -13,7 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang={branding.site.locale}
       className="h-full antialiased"
       data-scroll-behavior="smooth"
     >

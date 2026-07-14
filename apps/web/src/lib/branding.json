@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "opk.branding.v1",
+  "site": {
+    "name": "OpenPortalKit Examples",
+    "shortName": "OPK",
+    "description": "Runnable public portal profiles with traceable publishing and structured data.",
+    "locale": "en"
+  },
+  "assets": {
+    "logo": null,
+    "favicon": {
+      "src": "/favicon.ico",
+      "width": 256,
+      "height": 256
+    },
+    "socialImage": {
+      "src": "/examples/corporate.webp",
+      "alt": "Engineers inspect an electric motor in a bright manufacturing laboratory.",
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "colors": {
+    "accent": "#087c78",
+    "accentStrong": "#075f5c",
+    "surface": "#ffffff",
+    "surfaceMuted": "#f4f7f6",
+    "text": "#151918"
+  },
+  "typography": {
+    "preset": "editorial"
+  },
+  "navigation": [
+    { "label": "Publications", "href": "#publications" },
+    { "label": "Data", "href": "#data" },
+    { "label": "Search", "href": "#search" }
+  ],
+  "footer": {
+    "copyright": "OpenPortalKit",
+    "links": [
+      { "label": "OpenAPI", "href": "/api/openapi.json" },
+      { "label": "LLMs.txt", "href": "/llms.txt" }
+    ]
+  }
+}

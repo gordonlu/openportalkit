@@ -11,6 +11,23 @@ public sealed class PublicDataSetQueryService
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
     }
 
+    public async Task<IReadOnlyList<PublicDataSetSummary>> ListPublicAsync(
+        Guid siteId,
+        CancellationToken cancellationToken = default)
+    {
+        var dataSets = await _dataSetStore.ListDataSetsAsync(siteId, cancellationToken);
+        return dataSets
+            .Where(dataSet => dataSet.IsPublic)
+            .OrderBy(dataSet => dataSet.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(dataSet => dataSet.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(dataSet => new PublicDataSetSummary(
+                dataSet.Code,
+                dataSet.Name,
+                dataSet.Description,
+                dataSet.UpdatedAt))
+            .ToArray();
+    }
+
     public async Task<PublicDataSetDetail?> FindByCodeAsync(
         Guid siteId,
         string code,

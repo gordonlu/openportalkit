@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OpenPortalKit Web
 
-## Getting Started
+`apps/web` is the public Next.js runtime for the five project profiles. It supports an explicit fixture-backed demo
+mode and a server-rendered live mode backed by ApiHost's read-safe public contracts.
 
-First, run the development server:
+## Current Boundary
+
+`OPK_WEB_DATA_MODE=demo` is the default and reads versioned fixtures from `src/lib/example-sites.ts`. Never present
+those counters or publications as production CMS data.
+
+`OPK_WEB_DATA_MODE=live` reads published content and portal pages from ApiHost on the server. It does not send admin
+credentials, request drafts, or silently fall back to fixtures when ApiHost is unavailable. It also renders the
+public dataset catalogue, proxies interactive public search through a same-origin read-only route, and emits
+canonical/OpenGraph metadata from the configured public origin.
+
+Profile routes are rendered by the Next.js server on each request so deployment-time environment changes are not
+frozen into a static demo build. Validated ApiHost list responses retain their explicit 60-second server cache.
+
+## Live Configuration
 
 ```bash
+OPK_WEB_DATA_MODE=live \
+OPK_API_BASE_URL=http://127.0.0.1:5051 \
+OPK_PUBLIC_BASE_URL=https://portal.example.com \
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- `OPK_API_BASE_URL` is the server-side ApiHost origin. It can use an internal network address.
+- `OPK_PUBLIC_BASE_URL` is the browser-visible HTTPS origin used to rebuild canonical public links.
+- Both values must be HTTP(S) URLs without embedded credentials or fragments.
+- Public list responses are schema-checked, limited to 20 items per resource, cached for 60 seconds, and bounded by a
+  five-second request timeout.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Source-Level Customization
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/lib/branding.json`: validated site identity, approved assets, color tokens, typography preset, navigation, and footer.
+- `src/lib/project-profile.json`: generated project name, selected profile, and selected industry packs.
+- `public/`: customer-owned public images, fonts, icons, and downloadable static assets.
+- `src/app/globals.css`: public-site design tokens, responsive rules, and typography.
+- `src/components/example-portal.tsx`: profile page composition.
+- `src/lib/example-sites.ts`: visual profiles and explicit demo-only publication fixtures.
+- `src/lib/public-api.ts`: server-only live public API/search client and response validation.
 
-## Learn More
+AdminHost styling is separate under `src/OpenPortalKit.AdminHost/wwwroot/css/site.css`. Changing AdminHost CSS does
+not brand the public Web application.
 
-To learn more about Next.js, take a look at the following resources:
+Source customization is supported. Runtime arbitrary CSS or script injection is intentionally not supported because
+it would weaken CSP, review, and publishing boundaries.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Validate branding paths, formats, file sizes, actual dimensions, SVG safety, links, and contrast from the repository
+root before building:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+./tools/opk branding validate --root .
+```
 
-## Deploy on Vercel
+When `assets.logo` is `null`, the header uses `site.shortName`; a missing declared file is a validation failure, not a
+silent network fallback. Full contract details are in `docs/r15-branding-assets.md`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Development and Verification
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm ci
+npm run dev
+npm run lint
+npm run build
+PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome npm run test:e2e
+PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome npm run test:e2e:live
+```
+
+The current production command is `npm run start` after `npm run build`; it requires a supported Node.js runtime.
+There is not yet a repository-owned Windows service wrapper or standalone Web artifact. Those are R15 delivery work.

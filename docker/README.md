@@ -104,18 +104,23 @@ Default Redis connection string:
 localhost:6379
 ```
 
-## R8 Durable Delivery
+## Apply Migrations
 
-Apply R8 migrations after PostgreSQL starts:
+Apply all pending migrations after PostgreSQL starts. The runner takes an advisory lock, records SHA-256 checksums,
+and rejects edits to an already applied migration:
 
 ```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U openportalkit -d openportalkit < db/postgresql/migrations/0008_agent_output_artifacts.sql
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U openportalkit -d openportalkit < db/postgresql/migrations/0009_publishing_delivery.sql
+export PGHOST=127.0.0.1
+export PGPORT=5432
+export PGDATABASE=openportalkit
+export PGUSER=openportalkit
+export PGPASSWORD=openportalkit_dev
+pwsh -NoProfile -File ./tools/invoke-postgres-migrations.ps1
 ```
 
-Set both `OpenPortalKit:Persistence:PostgreSQL:Enabled` and `OpenPortalKit:AgentAccess:PostgreSQL:Enabled` to `true` in AdminHost and JobHost before running the worker. JobHost refuses to start when either durable store is disabled.
+Use the mapped `POSTGRES_PORT` value for `PGPORT`. Set both
+`OpenPortalKit:Persistence:PostgreSQL:Enabled` and `OpenPortalKit:AgentAccess:PostgreSQL:Enabled` to `true` in
+AdminHost and JobHost before running the worker. JobHost refuses to start when either durable store is disabled.
 
 ## Health
 

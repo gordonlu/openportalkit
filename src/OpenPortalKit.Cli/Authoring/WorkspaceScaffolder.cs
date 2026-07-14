@@ -25,13 +25,13 @@ public sealed record WorkspaceTemplateInspection(
 public sealed class WorkspaceScaffolder
 {
     public const string ProjectSchemaVersion = "opk.project.v2";
-    public const string TemplateVersion = "0.4.0-r13";
+    public const string TemplateVersion = "0.5.0-r15";
 
     private static readonly string[] RootFiles =
     [
         ".editorconfig", ".gitignore", "AGENTS.md", "AGENT_SEO.md", "ARCHITECTURE.md",
         "CONTRIBUTING.md", "DASHBOARD.md", "DATA_PUBLISHING.md", "DEPLOYMENT.md",
-        "Directory.Build.props", "INDUSTRY_PACKS.md", "MIGRATION_FROM_LEGACY_DOTNET.md",
+        "Directory.Build.props", "INDUSTRY_PACKS.md", "LICENSE", "MIGRATION_FROM_LEGACY_DOTNET.md",
         "MODULES.md", "OpenPortalKit.sln", "README.md", "SECURITY.md", "global.json", "roadmap.md"
     ];
 
@@ -274,6 +274,11 @@ public sealed class WorkspaceScaffolder
         await File.WriteAllTextAsync(profilePath,
             JsonSerializer.Serialize(profileDocument, jsonOptions) + Environment.NewLine, cancellationToken);
 
+        var branding = BrandingFor(name, profile.DefaultSite);
+        var brandingPath = Path.Combine(stagingRoot, "apps", "web", "src", "lib", "branding.json");
+        await File.WriteAllTextAsync(brandingPath,
+            JsonSerializer.Serialize(branding, jsonOptions) + Environment.NewLine, cancellationToken);
+
         var projectReadme = $"""
             # {name}
 
@@ -285,6 +290,7 @@ public sealed class WorkspaceScaffolder
             ```powershell
             dotnet build OpenPortalKit.sln -m:1
             powershell -ExecutionPolicy Bypass -File ./tools/check-boundaries.ps1
+            ./tools/opk branding validate --root .
             ```
 
             The selected industry packs are recorded in `openportalkit.project.json`; selecting a pack does not silently enable it in a database.
@@ -293,10 +299,81 @@ public sealed class WorkspaceScaffolder
             projectReadme + Environment.NewLine, cancellationToken);
     }
 
+    private static object BrandingFor(string name, string profile)
+    {
+        var configuration = profile switch
+        {
+            "data" => new BrandingProfile("#176b45", "#0f5134", "modern", "/examples/data.webp",
+                "Data analysts examine maps and charts in a public operations room."),
+            "research" => new BrandingProfile("#8a2445", "#681a34", "editorial", "/examples/research.webp",
+                "Researchers examine a material sample beside scientific equipment."),
+            "activity" => new BrandingProfile("#c4442f", "#92301f", "modern", "/examples/activity.webp",
+                "A speaker addresses an audience at an inclusive technology forum."),
+            "finance" => new BrandingProfile("#28603e", "#19462c", "institutional", "/examples/finance.webp",
+                "A corporate team reviews audited reports in a bright boardroom."),
+            _ => new BrandingProfile("#087c78", "#075f5c", "editorial", "/examples/corporate.webp",
+                "Engineers inspect an electric motor in a bright manufacturing laboratory.")
+        };
+        return new
+        {
+            schemaVersion = BrandingManifestValidator.SchemaVersion,
+            site = new
+            {
+                name,
+                shortName = ShortName(name),
+                description = $"{name} publishes accessible, traceable public content and structured data.",
+                locale = "en"
+            },
+            assets = new
+            {
+                logo = (object?)null,
+                favicon = new { src = "/favicon.ico", width = 256, height = 256 },
+                socialImage = new { src = configuration.SocialImage, alt = configuration.SocialImageAlt, width = 1920, height = 1080 }
+            },
+            colors = new
+            {
+                accent = configuration.Accent,
+                accentStrong = configuration.AccentStrong,
+                surface = "#ffffff",
+                surfaceMuted = "#f4f7f6",
+                text = "#151918"
+            },
+            typography = new { preset = configuration.Typography },
+            navigation = new[]
+            {
+                new { label = "Publications", href = "#publications" },
+                new { label = "Data", href = "#data" },
+                new { label = "Search", href = "#search" }
+            },
+            footer = new
+            {
+                copyright = name,
+                links = new[]
+                {
+                    new { label = "OpenAPI", href = "/api/openapi.json" },
+                    new { label = "LLMs.txt", href = "/llms.txt" }
+                }
+            }
+        };
+    }
+
+    private static string ShortName(string name)
+    {
+        var words = name.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var initials = string.Concat(words.Take(4).Select(word => char.ToUpperInvariant(word[0])));
+        return initials.Length > 0 ? initials : name[..Math.Min(name.Length, 12)].ToUpperInvariant();
+    }
+
     private static string NormalizePath(string path) => path.Replace(Path.DirectorySeparatorChar, '/');
     private static StringComparison PathComparison => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
 
     internal sealed record TemplateFile(string Path, long Length, string Checksum);
+    private sealed record BrandingProfile(
+        string Accent,
+        string AccentStrong,
+        string Typography,
+        string SocialImage,
+        string SocialImageAlt);
 }

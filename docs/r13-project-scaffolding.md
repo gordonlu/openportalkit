@@ -114,3 +114,8 @@ fixture creates a complete current-source workspace and reruns the product bound
 builds a generated solution with one MSBuild worker, including a generated module and its contract test.
 
 R13 will not implement automatic merge upgrades, arbitrary code generation, or a low-code module designer.
+
+The generated workspace is the start of a customer project, not a finished production deployment. Supported
+source-level branding locations, the current fixture-backed Web limitation, Windows publishing commands, database
+promotion, and production acceptance are documented in `deployment.md`. R15 will close the live Web runtime and
+repeatable Windows delivery gaps identified there.

@@ -5,6 +5,7 @@ using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
 using OpenPortalKit.Modules.Content.BlockTemplates;
 using OpenPortalKit.Modules.Content.ContentItems;
+using OpenPortalKit.Modules.Data.Datasets;
 using OpenPortalKit.Modules.Workflow.Publishing;
 
 var connectionString = Environment.GetEnvironmentVariable("OPK_POSTGRES_INTEGRATION");
@@ -47,14 +48,18 @@ try
     await AuditRoundTrip(connectionFactory);
     await IdempotencyRoundTrip(connectionFactory);
     await ContentInventoryRoundTrip(connectionFactory);
+    await StructuredDataRoundTrip(connectionFactory);
     await PortalPageConcurrencyRoundTrip(connectionFactory);
+    await PublicPortalPagePaginationRoundTrip(connectionFactory);
     await PublishingWorkflowRoundTrip(connectionFactory);
     Console.WriteLine("PASS PostgreSQL migration is repeatable in an isolated schema");
     Console.WriteLine("PASS PostgreSQL outbox lease and retry behavior round trips");
     Console.WriteLine("PASS PostgreSQL audit metadata round trips");
     Console.WriteLine("PASS PostgreSQL idempotency state round trips");
     Console.WriteLine("PASS PostgreSQL content inventory filters and traceability round trip");
+    Console.WriteLine("PASS PostgreSQL structured data catalog and record traceability round trip");
     Console.WriteLine("PASS PostgreSQL portal page optimistic concurrency rejects stale writes");
+    Console.WriteLine("PASS PostgreSQL public portal page pagination follows visibility and publication order");
     Console.WriteLine("PASS PostgreSQL workflow review evidence, scheduling, and concurrency round trip");
     return 0;
 }
@@ -75,7 +80,8 @@ static async Task ApplyMigrationTwiceAsync(string root, string connectionString)
         "0011_portal_pages.sql",
         "0012_portal_page_versions.sql",
         "0016_content_items.sql",
-        "0017_publishing_workflow.sql"
+        "0017_publishing_workflow.sql",
+        "0018_structured_data.sql"
     })
     {
         var sql = await File.ReadAllTextAsync(Path.Combine(root, "db", "postgresql", "migrations", migration));
@@ -169,6 +175,33 @@ static async Task PortalPageConcurrencyRoundTrip(IOpenPortalKitDbConnectionFacto
     Assert.Equal(2, versions.Count, "Rejected page update created a version snapshot.");
 }
 
+static async Task PublicPortalPagePaginationRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
+{
+    var actorId = Guid.NewGuid();
+    var siteId = Guid.NewGuid();
+    var now = DateTimeOffset.UtcNow;
+    var template = new PageTemplate(
+        Guid.NewGuid(), "public-listing", "Public listing", "Public listing integration template.",
+        PageTemplateStatus.Published, 1, Array.Empty<BlockInstance>(), actorId, actorId, now, now);
+    await new PostgresPageTemplateStore(connectionFactory).SaveAsync(template);
+    var store = new PostgresPageStore(connectionFactory);
+
+    PortalPage CreatePage(string title, PortalPageStatus status, DateTimeOffset? publishedAt) => new(
+        Guid.NewGuid(), siteId, template.Id, template.Version, title, SlugGenerator.Generate(title),
+        title + " summary.", status, template.Blocks, actorId, actorId, now, now, publishedAt);
+
+    await store.UpsertAsync(CreatePage("Draft", PortalPageStatus.Draft, null));
+    await store.UpsertAsync(CreatePage("Older visible", PortalPageStatus.Published, now.AddMinutes(-2)));
+    await store.UpsertAsync(CreatePage("Newest visible", PortalPageStatus.Published, now.AddMinutes(-1)));
+    await store.UpsertAsync(CreatePage("Future", PortalPageStatus.Published, now.AddMinutes(1)));
+
+    var pages = await store.ListPublishedPageAsync(siteId, now, skip: 1, take: 1);
+
+    Assert.Equal(1, pages.Count, "PostgreSQL public page pagination returned an incorrect page size.");
+    Assert.Equal("Older visible", pages[0].Title,
+        "PostgreSQL public page pagination ran before visibility filtering or used unstable ordering.");
+}
+
 static async Task ContentInventoryRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
 {
     var store = new PostgresContentItemStore(connectionFactory);
@@ -216,6 +249,50 @@ static async Task ContentInventoryRoundTrip(IOpenPortalKitDbConnectionFactory co
         "Latest content revision did not preserve the full snapshot.");
     Assert.Equal("A durable content draft.", versions[1].Snapshot.Summary,
         "Earlier content revision was mutated by a later write.");
+}
+
+static async Task StructuredDataRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
+{
+    var dataSetStore = new PostgresDataSetStore(connectionFactory);
+    var recordStore = new PostgresDataRecordStore(connectionFactory);
+    var importService = new DataImportService(dataSetStore, recordStore);
+    var siteId = Guid.NewGuid();
+    var now = DateTimeOffset.UtcNow;
+    var publicDataSet = new DataSet(
+        Guid.NewGuid(), siteId, "public-operations", "Public operations", "Traceable public operations data.",
+        true, now, now);
+    var privateDataSet = new DataSet(
+        Guid.NewGuid(), siteId, "private-operations", "Private operations", "Internal operations data.",
+        false, now, now);
+    var schema = new DataSchemaVersion(
+        Guid.NewGuid(), publicDataSet.Id, 1, """{"type":"object","properties":{"value":{"type":"number"}}}""",
+        DataChecksum.FromJson("""{"type":"object","properties":{"value":{"type":"number"}}}"""), now);
+
+    await dataSetStore.AddDataSetAsync(publicDataSet);
+    await dataSetStore.AddDataSetAsync(privateDataSet);
+    await dataSetStore.AddSchemaVersionAsync(schema);
+    var actorId = Guid.NewGuid();
+    var imported = await importService.ImportAsync(new DataImportRequest(
+        publicDataSet.Id, schema.Id, "postgres-integration", new DateOnly(2026, 7, 14), actorId,
+        new[] { new DataImportRow("record-1", """{"value":42}""") }, ImportedAt: now));
+
+    var query = new PublicDataSetQueryService(dataSetStore, recordStore);
+    var catalog = await query.ListPublicAsync(siteId);
+    var detail = await query.FindByCodeAsync(siteId, publicDataSet.Code);
+    var storedSchema = await query.FindSchemaByCodeAsync(siteId, publicDataSet.Code);
+
+    Assert.True(imported.Succeeded, "PostgreSQL structured-data import failed.");
+    Assert.Equal(1, catalog.Count, "PostgreSQL public catalog leaked a private dataset.");
+    Assert.Equal(publicDataSet.Code, catalog[0].Code, "PostgreSQL public catalog returned the wrong dataset.");
+    Assert.Equal(1, detail?.Records.Count ?? 0, "PostgreSQL public detail omitted an imported record.");
+    Assert.Equal(imported.Batch.Id, detail!.Records[0].SourceBatchId,
+        "PostgreSQL structured record did not preserve its source batch.");
+    Assert.Equal(new DateOnly(2026, 7, 14), detail.Records[0].AsOfDate,
+        "PostgreSQL structured record did not preserve its as-of date.");
+    Assert.Equal(schema.Id, detail.Records[0].SchemaVersionId,
+        "PostgreSQL structured record did not preserve its schema version.");
+    Assert.Equal(schema.Checksum, storedSchema?.Checksum,
+        "PostgreSQL structured schema did not preserve its checksum.");
 }
 
 static async Task OutboxLeaseAndIdempotencyRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)

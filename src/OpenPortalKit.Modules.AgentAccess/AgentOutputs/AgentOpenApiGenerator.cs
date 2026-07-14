@@ -39,6 +39,7 @@ public static class AgentOpenApiGenerator
         {
             ["/api/public"] = GetPath("/api/public", "getPublicApiDiscovery", "Public API discovery document."),
             ["/api/public/content"] = GetPaginatedPath("/api/public/content", "listPublicContent", "Published public content summaries.", 20),
+            ["/api/public/pages"] = GetPaginatedPath("/api/public/pages", "listPublicPages", "Published public page summaries.", 20),
             ["/content/{slug}"] = GetConditionalPath("/content/{slug}", "getPublicContentHtml", "Semantic HTML for one public content item."),
             ["/api/public/content/{slug}.json"] = GetConditionalPath("/api/public/content/{slug}.json", "getPublicContentJson", "Machine-readable JSON snapshot for one public content item."),
             ["/content/{slug}.md"] = GetConditionalPath("/content/{slug}.md", "getPublicContentMarkdown", "Markdown snapshot for one public content item."),

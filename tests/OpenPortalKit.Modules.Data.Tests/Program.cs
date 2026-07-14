@@ -7,10 +7,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("invalid import does not corrupt existing records", InvalidImportDoesNotCorruptExistingRecords),
     ("checksum detects unchanged and updated records", ChecksumDetectsUnchangedAndUpdatedRecords),
     ("public query hides private datasets and returns traceability", PublicQueryHidesPrivateDatasetsAndReturnsTraceability),
+    ("public catalog excludes private datasets and uses stable ordering", PublicCatalogExcludesPrivateDataSets),
     ("CSV parser imports quoted rows through data import service", CsvParserImportsQuotedRowsThroughDataImportService),
     ("CSV export includes traceability columns", CsvExportIncludesTraceabilityColumns),
     ("public query resolves schema and record by key", PublicQueryResolvesSchemaAndRecordByKey),
-    ("snapshot generator creates stable JSON snapshot with checksum", SnapshotGeneratorCreatesStableJsonSnapshotWithChecksum)
+    ("snapshot generator creates stable JSON snapshot with checksum", SnapshotGeneratorCreatesStableJsonSnapshotWithChecksum),
+    ("PostgreSQL migration preserves structured-data traceability", PostgresMigrationPreservesTraceability)
 };
 
 var failed = 0;
@@ -181,6 +183,28 @@ static async Task PublicQueryHidesPrivateDatasetsAndReturnsTraceability()
     Assert.Equal(null, privateDetail);
 }
 
+static async Task PublicCatalogExcludesPrivateDataSets()
+{
+    var dataSetStore = new InMemoryDataSetStore();
+    var recordStore = new InMemoryDataRecordStore();
+    var siteId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 14, 8, 0, 0, TimeSpan.Zero);
+    await dataSetStore.AddDataSetAsync(new DataSet(
+        Guid.NewGuid(), siteId, "z-public", "Zulu", "Visible Zulu dataset.", true, now, now));
+    await dataSetStore.AddDataSetAsync(new DataSet(
+        Guid.NewGuid(), siteId, "a-private", "Alpha", "Private dataset.", false, now, now));
+    await dataSetStore.AddDataSetAsync(new DataSet(
+        Guid.NewGuid(), siteId, "a-public", "Alpha", "Visible Alpha dataset.", true, now, now));
+    await dataSetStore.AddDataSetAsync(new DataSet(
+        Guid.NewGuid(), Guid.NewGuid(), "other-site", "Other", "Wrong site.", true, now, now));
+
+    var catalog = await new PublicDataSetQueryService(dataSetStore, recordStore).ListPublicAsync(siteId);
+
+    Assert.Equal(2, catalog.Count);
+    Assert.Equal("a-public", catalog[0].Code);
+    Assert.Equal("z-public", catalog[1].Code);
+}
+
 static async Task CsvParserImportsQuotedRowsThroughDataImportService()
 {
     var context = await CreateContextAsync(isPublic: true);
@@ -276,6 +300,29 @@ static async Task SnapshotGeneratorCreatesStableJsonSnapshotWithChecksum()
     Assert.Contains("snapshot-set", snapshot.Content);
     Assert.Equal(import.Batch.Id, snapshot.SourceBatchId);
     Assert.True(!string.IsNullOrWhiteSpace(snapshot.Checksum), "Expected snapshot checksum.");
+}
+
+static async Task PostgresMigrationPreservesTraceability()
+{
+    var root = FindRepositoryRoot();
+    var migration = await File.ReadAllTextAsync(Path.Combine(
+        root, "db", "postgresql", "migrations", "0018_structured_data.sql"));
+
+    Assert.Contains("opk_data_sets", migration);
+    Assert.Contains("opk_data_schema_versions", migration);
+    Assert.Contains("opk_data_records", migration);
+    Assert.Contains("source_batch_id uuid not null", migration);
+    Assert.Contains("as_of_date date not null", migration);
+    Assert.Contains("schema_version_id uuid not null", migration);
+    Assert.Contains("checksum text not null", migration);
+}
+
+static string FindRepositoryRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "OpenPortalKit.sln")))
+        directory = directory.Parent;
+    return directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
 }
 
 static async Task<DataTestContext> CreateContextAsync(bool isPublic, string code = "dataset")

@@ -33,4 +33,12 @@ public sealed class PublicPageQueryService
         var now = asOf ?? DateTimeOffset.UtcNow;
         return await _store.ListPublishedAsync(siteId, now, cancellationToken);
     }
+
+    public Task<IReadOnlyList<PortalPage>> ListPublishedPageAsync(
+        Guid siteId,
+        int skip,
+        int take,
+        DateTimeOffset? asOf = null,
+        CancellationToken cancellationToken = default) =>
+        _store.ListPublishedPageAsync(siteId, asOf ?? DateTimeOffset.UtcNow, skip, take, cancellationToken);
 }

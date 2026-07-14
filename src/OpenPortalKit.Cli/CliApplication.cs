@@ -6,7 +6,7 @@ namespace OpenPortalKit.Cli;
 
 public sealed class CliApplication(TextWriter output, TextWriter error)
 {
-    private const string Version = "0.4.0-r13";
+    private const string Version = "0.5.0-r15";
     private readonly TextWriter _output = output ?? throw new ArgumentNullException(nameof(output));
     private readonly TextWriter _error = error ?? throw new ArgumentNullException(nameof(error));
 
@@ -36,6 +36,7 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
                 "module" => await RunModuleAsync(args[1..], cancellationToken),
                 "template" => await RunTemplateAsync(args[1..], cancellationToken),
                 "upgrade" => await RunUpgradeAsync(args[1..], cancellationToken),
+                "branding" => await RunBrandingAsync(args[1..], cancellationToken),
                 "industry-pack" => await RunIndustryPackAsync(args[1..], cancellationToken),
                 "import" => await RunImportAsync(args[1..], cancellationToken),
                 _ => UsageError($"Unknown command '{args[0]}'.")
@@ -59,6 +60,39 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
             Path.GetFullPath(options.Root),
             RepositoryLocator.Find(options.Source),
             cancellationToken);
+        WriteReport(report, options.Format);
+        return report.IsSuccessful ? 0 : 1;
+    }
+
+    private async Task<int> RunBrandingAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "validate")
+            return UsageError("branding requires the 'validate' subcommand.");
+        var options = ParseOptions(args[1..], allowUrl: false, allowTimeout: false);
+        var root = RepositoryLocator.Find(options.Root);
+        var result = await new BrandingManifestValidator().ValidateAsync(root, cancellationToken);
+        CheckReport report;
+        if (result.Succeeded)
+        {
+            report = new CheckReport("OpenPortalKit branding validation",
+            [
+                new CheckResult("OPK-BRAND-001", CheckStatus.Passed, BrandingManifestValidator.RelativeManifestPath,
+                    $"Manifest uses {BrandingManifestValidator.SchemaVersion} and passed semantic validation."),
+                new CheckResult("OPK-BRAND-002", CheckStatus.Passed, "Web branding assets",
+                    $"{result.AssetCount} declared assets exist, are contained, and match their declared dimensions.")
+            ]);
+        }
+        else
+        {
+            report = new CheckReport("OpenPortalKit branding validation",
+                result.Errors.Select(validationError => new CheckResult(
+                    "OPK-BRAND-VALIDATION",
+                    CheckStatus.Failed,
+                    validationError.Path,
+                    $"{validationError.Code}: {validationError.Message}"))
+                    .ToArray());
+        }
+
         WriteReport(report, options.Format);
         return report.IsSuccessful ? 0 : 1;
     }
@@ -528,6 +562,7 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
         _output.WriteLine("  opk module add --name <PascalCaseName> --area <slug> --description <text> [--owns-state true|false] [--public-outputs HTML,Markdown,JSON,Sitemap,RSS,Search,AgentSEO|none] [--root <repository>]");
         _output.WriteLine("  opk template pack --output <archive.opkt> [--source <repository>]");
         _output.WriteLine("  opk upgrade inspect --root <workspace> --source <candidate-repository> [--format text|json]");
+        _output.WriteLine("  opk branding validate [--root <workspace>] [--format text|json]");
         _output.WriteLine("  opk check-boundaries [--root <path>] [--format text|json]");
         _output.WriteLine("  opk check-agent-readiness [--root <path>] [--format text|json]");
         _output.WriteLine("  opk check-agent-readiness --url <https://site> [--timeout <seconds>] [--format text|json]");

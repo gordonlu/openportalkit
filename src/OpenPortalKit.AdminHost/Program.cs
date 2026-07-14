@@ -219,8 +219,6 @@ builder.Services.Configure<AnalyticsPrivacyOptions>(
     builder.Configuration.GetSection(AnalyticsPrivacyOptions.SectionName));
 builder.Services.Configure<DashboardSummaryOptions>(
     builder.Configuration.GetSection(DashboardSummaryOptions.SectionName));
-builder.Services.AddSingleton<IDataSetStore, InMemoryDataSetStore>();
-builder.Services.AddSingleton<IDataRecordStore, InMemoryDataRecordStore>();
 builder.Services.AddSingleton<IAgentReadinessSignalProvider, ContentAgentReadinessSignalProvider>();
 builder.Services.Configure<AgentBotPolicyOptions>(
     builder.Configuration.GetSection(AgentBotPolicyOptions.SectionName));
@@ -293,6 +291,8 @@ if (persistencePostgres.Enabled)
 {
     builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
     builder.Services.AddSingleton<IContentItemStore, PostgresContentItemStore>();
+    builder.Services.AddSingleton<IDataSetStore, PostgresDataSetStore>();
+    builder.Services.AddSingleton<IDataRecordStore, PostgresDataRecordStore>();
     builder.Services.AddSingleton<IOutboxMessageStore, PostgresOutboxMessageStore>();
     builder.Services.AddSingleton<IIdempotencyStore, PostgresIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, PostgresAuditLogStore>();
@@ -307,6 +307,8 @@ else
     builder.Services.AddSingleton<IContentItemStore>(_ => builder.Environment.IsDevelopment()
         ? DevelopmentContentStoreFactory.Create()
         : new InMemoryContentItemStore());
+    builder.Services.AddSingleton<IDataSetStore, InMemoryDataSetStore>();
+    builder.Services.AddSingleton<IDataRecordStore, InMemoryDataRecordStore>();
     builder.Services.AddSingleton<IOutboxMessageStore, InMemoryOutboxMessageStore>();
     builder.Services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();

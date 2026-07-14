@@ -20,6 +20,13 @@ public interface IPageStore
         DateTimeOffset asOf,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<PortalPage>> ListPublishedPageAsync(
+        Guid siteId,
+        DateTimeOffset asOf,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PortalPageVersion>> ListVersionsAsync(
         Guid pageId,
         CancellationToken cancellationToken = default);

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openportalkit.org/schemas/branding-manifest.v1.schema.json",
+  "title": "OpenPortalKit Branding Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "site", "assets", "colors", "typography", "navigation", "footer"],
+  "properties": {
+    "schemaVersion": { "const": "opk.branding.v1" },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "shortName", "description", "locale"],
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "shortName": { "type": "string", "minLength": 1, "maxLength": 12 },
+        "description": { "type": "string", "minLength": 10, "maxLength": 240 },
+        "locale": { "type": "string", "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$" }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logo", "favicon", "socialImage"],
+      "properties": {
+        "logo": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/imageWithAlt" }
+          ]
+        },
+        "favicon": { "$ref": "#/$defs/image" },
+        "socialImage": { "$ref": "#/$defs/imageWithAlt" }
+      }
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accent", "accentStrong", "surface", "surfaceMuted", "text"],
+      "properties": {
+        "accent": { "$ref": "#/$defs/color" },
+        "accentStrong": { "$ref": "#/$defs/color" },
+        "surface": { "$ref": "#/$defs/color" },
+        "surfaceMuted": { "$ref": "#/$defs/color" },
+        "text": { "$ref": "#/$defs/color" }
+      }
+    },
+    "typography": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset"],
+      "properties": {
+        "preset": { "enum": ["editorial", "modern", "institutional"] }
+      }
+    },
+    "navigation": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/link" }
+    },
+    "footer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["copyright", "links"],
+      "properties": {
+        "copyright": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "links": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/link" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "href"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "href": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "width", "height"],
+      "properties": {
+        "src": { "type": "string", "pattern": "^/" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 }
+      }
+    },
+    "imageWithAlt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "alt", "width", "height"],
+      "properties": {
+        "src": { "type": "string", "pattern": "^/" },
+        "alt": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 }
+      }
+    }
+  }
+}

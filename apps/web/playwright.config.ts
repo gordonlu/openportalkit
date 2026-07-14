@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: ["live-public-api.spec.ts", "live-dependency-failure.spec.ts"],
   outputDir: "/tmp/openportalkit-playwright",
   fullyParallel: false,
   workers: 1,

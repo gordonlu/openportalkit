@@ -3289,7 +3289,7 @@ DASHBOARD.md
 
 DATA\_PUBLISHING.md
 
-DEPLOYMENT.md
+docs/deployment.md
 
 MIGRATION\_FROM\_LEGACY\_DOTNET.md
 
@@ -3553,8 +3553,8 @@ accessible Razor Pages backed by existing audited module services.
 
 Batches 1 and 2 are complete. The shared shell and content inventory now include server-side filtering, pagination,
 selection, development fixtures, PostgreSQL persistence, immutable full-snapshot revisions, traceability, and public
-visibility filtering before pagination. Permission checks will be attached to the real save, review, and publication
-commands introduced in Batches 3 and 4.
+visibility filtering before pagination. Batches 3 and 4 attach explicit edit/review/publication permissions and a
+stable authenticated actor to every AdminHost workflow command.
 
 Batches 1 through 3 are complete. Portal Page editing renders controls and typed list rows from the predefined block
 schema, retains an expert JSON fallback, resolves stable audit actors from the administrator identity, separates edit
@@ -3593,6 +3593,154 @@ review, scheduling, publication, audit, and AgentSEO readiness
 
 Every public-output-changing action must use existing workflow, audit, outbox, and revalidation contracts. R14 does
 not add industry-specific entities to core, a generic BPM designer, or a second frontend application.
+
+
+\---
+
+
+\# R15 — Customer Portal Runtime + Windows Delivery
+
+
+\*\*Status: in progress.\*\* R15 closes the path from a generated, customer-customized source workspace to a live,
+CMS-backed public portal and an evidence-backed Windows Server deployment. It does not replace source distribution
+with one fixed portal binary.
+
+
+\## Goal
+
+
+Make the five public Web profiles consume the real read-safe ApiHost contracts, define controlled branding and asset
+customization points, and produce repeatable Windows deployment artifacts and operating evidence for ApiHost,
+AdminHost, JobHost, and the public Web runtime.
+
+
+\## Batch 1: Live Public Web Runtime
+
+
+\*\*Completed 2026-07-14.\*\* ApiHost exposes paginated published pages, durable public datasets, and current-store
+public search. The Web runtime has explicit `demo` and `live` modes; live mode validates and server-renders published
+content, pages, and datasets, proxies search without exposing the internal ApiHost origin, rebuilds public links,
+emits canonical/OpenGraph metadata, and shows an unavailable state without fixture fallback. Desktop/mobile demo
+E2E, sequential success/failure live E2E, Host contracts, and PostgreSQL visibility/provenance tests cover the batch.
+Details are in `docs/r15-public-web-runtime.md`.
+
+
+Replace example fixture reads in `apps/web` with server-rendered ApiHost clients for:
+
+
+```txt
+
+published content and portal pages
+
+datasets and traceability
+
+public search
+
+HTML metadata and canonical URLs
+
+error, empty, stale, and dependency-unavailable states
+
+```
+
+
+The five profiles must remain structurally distinct, but all must consume the same documented public contracts.
+Example fixtures remain available only for explicit demo/test mode. Public rendering must not require administrator
+credentials or expose draft state.
+
+
+\## Batch 2: Branding and Asset Contract
+
+
+\*\*Completed 2026-07-14.\*\* Generated workspaces now carry a strict `opk.branding.v1` manifest for public
+identity, logo/fallback mark, favicon, social image, bounded typography, contrast-checked colors, navigation, and
+footer links. `opk branding validate` checks schema semantics, safe links and paths, file containment, type, size,
+real dimensions, and SVG active content. Web consumes the contract for metadata and customer/live identity while
+the five framework demos retain distinct layouts. Tests cover valid assets, unsafe links, low contrast, false
+dimensions, and profile-aware scaffolding. Details are in `docs/r15-branding-assets.md`.
+
+
+Add a versioned project branding manifest for site name, logo, favicon, typography choices, color tokens, navigation,
+footer, and approved static assets. Validate file type, dimensions, size, contrast, responsive behavior, and missing
+asset fallbacks. Source-level React/CSS customization remains supported; runtime arbitrary script or CSS injection
+remains prohibited.
+
+
+This batch adds asset authoring only at the publishing-framework boundary. It does not become a DAM, general design
+canvas, or low-code site builder.
+
+
+\## Batch 3: Reproducible Delivery Artifacts
+
+
+Add a repository-owned release command that:
+
+
+```txt
+
+builds sequentially with one MSBuild worker
+
+publishes ApiHost, AdminHost, and JobHost for win-x64
+
+packages the supported public Web runtime
+
+excludes secrets, keys, backups, logs, and development state
+
+records source/project provenance and configuration schema versions
+
+emits a file inventory and SHA-256 checksums
+
+fails when migrations, tests, boundaries, or Web checks are incomplete
+
+```
+
+
+Artifacts belong to the generated customer workspace and its approved customization commit. R15 does not publish a
+single preconfigured application that claims to fit every customer.
+
+
+\## Batch 4: Windows Operations and Handoff
+
+
+Provide tested Windows Server guidance and scripts for non-administrator service identities, Windows Service or IIS
+hosting as appropriate, HTTPS reverse proxying, exact host/proxy trust, firewall rules, protected Data Protection
+keys, PostgreSQL backup/migration, graceful JobHost restart, health probes, log collection, upgrade inspection, and
+application/database rollback constraints.
+
+
+Complete a target-environment rehearsal with real OIDC Authorization Code + PKCE, MFA/role enforcement, session
+revocation, scheduled publication, outbox/AgentSEO regeneration, backup restore, and live readiness checks. Evidence
+must be attached to the release commit and artifact checksums.
+
+
+\## Acceptance Criteria
+
+
+```txt
+
+customer branding does not require edits to framework core
+
+all five Web profiles render live published data without fixtures
+
+draft and administrative data never enter public Web responses
+
+public HTML, Markdown, JSON, sitemap, RSS, search, and AgentSEO remain coherent after publication
+
+customized source produces deterministic, checksummed Windows artifacts
+
+ApiHost, AdminHost, JobHost, and Web runtime survive restart and dependency recovery
+
+scheduled publication is verified through the deployed JobHost
+
+Windows Server and real OIDC rehearsal evidence passes the release checklist
+
+upgrade and rollback responsibilities are documented and exercised
+
+module and industry-pack boundaries still pass
+
+```
+
+
+Current manual customization and deployment boundaries are documented in `docs/deployment.md`.
 
 
 \---

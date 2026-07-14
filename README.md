@@ -1,168 +1,178 @@
 # OpenPortalKit
 
-OpenPortalKit is an open-source framework for enterprise portals, content-heavy websites, and structured data publishing platforms.
+![OpenPortalKit public portal, publishing workflow, structured data, and API outputs](docs/assets/openportalkit-header.webp)
 
-The project is initialized as a modular monolith. The core is industry-neutral; vertical concepts belong in industry packs.
+[![CI](https://github.com/gordonlu/openportalkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gordonlu/openportalkit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/gordonlu/openportalkit)](https://github.com/gordonlu/openportalkit/commits/main)
 
-## Current State
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE?logo=powershell&logoColor=white)](https://github.com/PowerShell/PowerShell)
 
-- .NET 10 solution and host skeletons
-- Kernel project with module, entity, event, audit, outbox, and job primitives
-- Kernel outbox processing contracts with leases, idempotency tracking, retry policy, PostgreSQL adapters, and package-free tests
-- Kernel audit recorder with in-memory and PostgreSQL query support by actor and target
-- Generic content entities, slug generation, publish validation, version snapshots, audited publish events, and package-free content tests
-- Read-safe public content query contracts that hide draft, archived, future, and expired content
-- SEO baseline contracts for canonical URLs, Open Graph metadata, JSON-LD, sitemap XML, RSS, and robots.txt
-- Legacy redirect rule resolution for public URL mapping foundations
-- Publishing revalidation contracts for sitemap/RSS/snapshot regeneration and public route cache invalidation
-- Publishing workflow transitions for draft, review, approval, rejection, scheduling, publishing, archive, restore, audit, and approval records
-- Structured data dataset, schema version, import batch, CSV import/export, record traceability, checksum, dry run, quality report, snapshot, and public query contracts
-- Search abstraction with in-memory provider, public/admin visibility rules, filters, repeatable reindexing, and outbox-driven indexing hook
-- Dashboard and analytics contracts with privacy-conscious event capture, AgentSEO readiness summaries, runtime health aggregation, dependency health probes, cached summaries, Prometheus text export, and .NET metrics publishing
-- Agent Access / AgentSEO contracts for Markdown snapshots, JSON snapshots, llms.txt, llms-full.txt, agent manifest, public OpenAPI, and AI bot policy
-- R9 Block Template System contracts for predefined, schema-versioned block instances, ordered page templates, configuration validation, and audited template revisions
-- Server-rendered R9 public page baseline at `/pages/{slug}`, with canonical metadata and sitemap/RSS discovery
-- R8 PostgreSQL agent output artifact migration script in `db/postgresql/migrations/0008_agent_output_artifacts.sql`
-- R8 durable publishing delivery migration in `db/postgresql/migrations/0009_publishing_delivery.sql`, including JobHost processing, lease-based outbox claims, revalidation records, and audit history
-- R9 versioned block template migration in `db/postgresql/migrations/0010_block_templates.sql`
-- R9 portal page migration in `db/postgresql/migrations/0011_portal_pages.sql`
-- R9 immutable portal page revision migration in `db/postgresql/migrations/0012_portal_page_versions.sql`
-- R14 durable content inventory and revisions in `db/postgresql/migrations/0016_content_items.sql`
-- R14 durable publishing workflow, due schedules, and approval evidence in `db/postgresql/migrations/0017_publishing_workflow.sql`
-- R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
-- Local PostgreSQL and Redis compose services with development connection string conventions
-- Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs
-- R10 reference pack portfolio for Finance, Technology, Education, and Entertainment under `industry-packs/`
-- R10 industry pack manifest loader with fail-closed validation, resource checksums, and the `/IndustryPacks` admin catalog
-- R10 audited, checksummed pack enablement state in `db/postgresql/migrations/0013_industry_pack_installations.sql`
-- R11 shared HTTP production baseline with security headers, trace IDs, rate limiting, HSTS, and separate liveness/readiness endpoints
-- R11 legacy-content migration analysis and controlled staging with traceable CSV validation, immutable batch journals, audited rollback, duplicate detection, missing-asset reporting, and URL mapping review
-- R11 failure-safe search snapshot rebuilds that remove stale documents and keep the previous index on validation failure
-- R11 bounded public `Cache-Control` policy for browser/CDN caching without caching admin, health, error, or cookie-setting responses
-- R11 bounded public API pagination, conditional `ETag`/`Last-Modified` requests, and removal of content-list N+1 reads
-- R11 PostgreSQL query audit with targeted analytics and public-page indexes in `0015_query_performance_indexes.sql`
-- R11 closed acceptance baseline with fail-closed production hosts, upload signature validation, dependency scanning, and sequential CI tests
-- R12 cross-platform `opk` CLI foundation with machine-readable boundary and AgentSEO readiness checks
-- Crawlable HTML content at `/content/{slug}` and JSON-LD/Open Graph metadata on public content and block pages
-- Architecture guardrail documents from R0
-- Tested structural boundary checks for industry neutrality, module dependency direction, public credential-field leakage, and migration coverage
+OpenPortalKit is an open-source .NET and Next.js framework for enterprise public portals, content-heavy websites,
+and traceable structured-data publishing. It provides an editorial AdminHost, read-safe public ApiHost, background
+JobHost, five public Web profiles, AgentSEO outputs, and optional industry packs.
+
+The framework is deliberately narrower than a general business platform. Core remains industry-neutral; it is not a
+CRM, BI system, trading platform, low-code builder, BPM suite, or data warehouse. Finance, Technology, Education,
+Entertainment, and future vertical concepts belong in `industry-packs/`.
+
+## Prerequisites
+
+- .NET 10 SDK
+- PowerShell 7+
+- Node.js 22+ and npm
+- Docker Compose v2 with PostgreSQL 17 for durable development and integration tests
+- Google Chrome or Chromium for Playwright UI tests
+
+## Quick Start
+
+Build the repository sequentially. The single MSBuild worker avoids concurrent output-file locks:
+
+```bash
+git clone https://github.com/gordonlu/openportalkit.git
+cd openportalkit
+dotnet restore OpenPortalKit.sln
+dotnet build OpenPortalKit.sln -m:1
+```
+
+Start the public API and administrator application in separate terminals:
+
+```bash
+dotnet run --project src/OpenPortalKit.ApiHost --launch-profile http
+dotnet run --project src/OpenPortalKit.AdminHost --launch-profile http
+```
+
+Open:
+
+- ApiHost: `http://localhost:5051`
+- AdminHost: `http://localhost:5152`
+- OpenAPI: `http://localhost:5051/api/openapi.json`
+- Agent discovery: `http://localhost:5051/llms.txt`
+
+Run the public Web application in explicit demo mode:
+
+```bash
+cd apps/web
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. Demo mode uses versioned example fixtures and is intended for visual exploration only.
+
+## Create a Portal Workspace
+
+After building the solution, generate a customer-owned workspace instead of editing a release package in place:
+
+```bash
+./tools/opk new \
+  --name "Atlas Public Portal" \
+  --profile corporate \
+  --output ../atlas-public-portal
+```
+
+Available profiles are `corporate`, `data`, `research`, `activity`, and `finance`. Customize the validated identity,
+colors, navigation, footer, logo, favicon, and social image in `apps/web/src/lib/branding.json`; keep customer assets
+under `apps/web/public/`. Validate them before source-level React/CSS work or publishing:
+
+```bash
+cd ../atlas-public-portal
+./tools/opk branding validate --root .
+```
+
+Keep customer-specific work in the generated workspace or a deliberate fork.
+
+## Durable Local Development
+
+Start PostgreSQL and Redis:
+
+```bash
+cp docker/.env.example docker/.env
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
+```
+
+Set the standard PostgreSQL variables and apply every migration through the checksum-verified migration runner:
+
+```bash
+export PGHOST=127.0.0.1
+export PGPORT=5432
+export PGDATABASE=openportalkit
+export PGUSER=openportalkit
+export PGPASSWORD=openportalkit_dev
+pwsh -NoProfile -File ./tools/invoke-postgres-migrations.ps1
+```
+
+If port `5432` is occupied, set `POSTGRES_PORT=15432` in `docker/.env` and use `PGPORT=15432`.
+
+Enable the main PostgreSQL store with environment configuration when starting ApiHost or AdminHost:
+
+```bash
+export ConnectionStrings__Default='Host=127.0.0.1;Port=5432;Database=openportalkit;Username=openportalkit;Password=openportalkit_dev'
+export OpenPortalKit__Persistence__PostgreSQL__Enabled=true
+```
+
+Run the public Web application against ApiHost:
+
+```bash
+cd apps/web
+OPK_WEB_DATA_MODE=live \
+OPK_API_BASE_URL=http://127.0.0.1:5051 \
+OPK_PUBLIC_BASE_URL=http://localhost:3000 \
+npm run dev
+```
+
+Live mode reads published content, pages, datasets, and search only. It never requests administrator credentials or
+falls back to demo records when ApiHost is unavailable.
+
+## Verify Changes
+
+```bash
+dotnet build OpenPortalKit.sln -m:1
+pwsh -NoProfile -File ./tools/check-boundaries.ps1
+pwsh -NoProfile -File ./tools/run-tests.ps1
+```
+
+In `apps/web`:
+
+```bash
+npm run lint
+npm run build
+PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome npm run test:e2e
+PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome npm run test:e2e:live
+```
+
+Set `OPK_POSTGRES_INTEGRATION` to a dedicated PostgreSQL connection string to include isolated-schema integration
+tests. Do not run multiple solution builds concurrently.
+
+## Documentation
+
+- [Development Guidelines](docs/development-guidelines.md): architecture, module, data, security, testing, and change workflow.
+- [Customization and Deployment](docs/deployment.md): customer workspace, live configuration, Windows publishing, and operations.
+- [Public Web Runtime](docs/r15-public-web-runtime.md): demo/live contracts, search proxy, metadata, and failure behavior.
+- [Branding and Assets](docs/r15-branding-assets.md): versioned identity manifest, safe assets, fallbacks, and validation.
+- [Production Hardening](docs/r11-production-hardening.md): authentication, cookies, rate limits, proxy trust, and secrets.
+- [Compatibility Policy](docs/compatibility-policy.md): public API and artifact compatibility expectations.
+- [Release Checklist](docs/release-checklist.md): repository, Windows, security, promotion, and rollback evidence.
+- [Examples](examples/README.md): five runnable visual profiles.
+- [Roadmap](roadmap.md): milestone history and remaining release work.
 
 ## Repository Layout
 
-```txt
-apps/
-src/
-industry-packs/
-templates/
-docs/
-examples/
-docker/
-tests/
-tools/
+```text
+apps/web/         Public Next.js runtime
+src/              .NET hosts, kernel, and generic modules
+industry-packs/   Optional vertical resources isolated from core
+templates/        Customer workspace templates
+db/               Versioned PostgreSQL migrations
+docker/           Local PostgreSQL and Redis services
+tests/            Unit, contract, host, and PostgreSQL integration tests
+tools/            CLI, migration, backup, security, and boundary commands
+docs/             Architecture, operations, and contributor guidance
 ```
 
-## Build
-
-```powershell
-dotnet restore OpenPortalKit.sln
-dotnet build OpenPortalKit.sln -m:1
-powershell -ExecutionPolicy Bypass -File ./tools/check-boundaries.ps1
-```
-
-The normal test runner executes package-free unit and Host integration projects sequentially:
-
-```powershell
-./tools/run-tests.ps1
-```
-
-Set `OPK_POSTGRES_INTEGRATION` to include the isolated-schema PostgreSQL integration project. CI runs this against a
-dedicated PostgreSQL 17 service even when a developer workstation has no local database configured.
-
-## Developer CLI
-
-Build the solution once, then run the repository checks through the cross-platform wrapper:
-
-```bash
-./tools/opk --help
-./tools/opk new --name "Atlas Public Portal" --profile data --output ../atlas-public-portal
-./tools/opk template pack --source . --output /tmp/openportalkit.opkt
-./tools/opk module add --name Announcements --area publishing-support --description "Reusable announcement delivery contracts." --public-outputs JSON,Markdown
-./tools/opk upgrade inspect --root ../atlas-public-portal --source .
-./tools/opk check-boundaries
-./tools/opk check-agent-readiness
-./tools/opk check-agent-readiness --url https://portal.example.com
-./tools/opk industry-pack add --name Example --output /tmp/opk-packs
-./tools/opk industry-pack validate --path industry-packs
-./tools/opk import legacy --input legacy.csv --assets assets.txt --output report.json --source legacy-mvc --import-batch batch-001 --as-of 2026-07-12 --schema-version legacy-content.v1
-```
-
-PowerShell users can invoke the same implementation through `./tools/opk.ps1`. Both checks support
-`--format json` for CI and coding-agent integrations. A failed rule returns exit code `1`; invalid usage
-returns exit code `2`.
-
-Runnable portal examples and their versioned fixtures are documented in `examples/README.md`. Public contract
-compatibility and release evidence requirements are defined in `docs/compatibility-policy.md` and
-`docs/release-checklist.md`.
-
-## Run Initial Hosts
-
-```powershell
-dotnet run --project src/OpenPortalKit.ApiHost
-dotnet run --project src/OpenPortalKit.AdminHost
-dotnet run --project src/OpenPortalKit.JobHost
-```
-
-The API host exposes:
-
-- `/health`
-- `/health/live`
-- `/health/ready`
-- `/api/system/modules`
-- `/robots.txt`
-- `/sitemap.xml`
-- `/rss.xml`
-- `/llms.txt`
-- `/llms-full.txt`
-- `/.well-known/agent.json`
-- `/api/openapi.json`
-- `/api/public/content`
-- `/content/{slug}`
-- `/api/public/content/{slug}.json`
-- `/content/{slug}.md`
-- `/api/public/redirects/resolve`
-- `/api/public/datasets`
-- `/api/public/datasets/{code}`
-- `/api/public/datasets/{code}/schema`
-- `/api/public/datasets/{code}/records`
-- `/api/public/datasets/{code}/records/{recordKey}`
-- `/api/public/datasets/{code}/export.csv`
-- `/api/public/search`
-- `/api/public/search/health`
-- `/analytics/client.js`
-- `/analytics/events`
-
-The admin host exposes:
-
-- `/admin/dashboard/summary`
-- `/admin/dashboard/snapshot`
-- `/admin/dashboard/metrics.prometheus`
-- `/admin/analytics/privacy`
-- `/admin/analytics/events`
-- `/analytics/events`
-
-R7 dashboard and analytics notes are in `docs/r7-dashboard-analytics.md`.
-R8 Agent Access and AgentSEO notes are in `docs/r8-agent-access.md`.
-R9 Block Template System notes are in `docs/r9-block-template-system.md`.
-R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
-R11 production hardening notes are in `docs/r11-production-hardening.md`.
-R12 stabilization status and the 1.0 acceptance matrix are in `docs/r12-developer-experience.md`.
-R13 source workspace scaffolding is documented in `docs/r13-project-scaffolding.md`.
-R14 Admin Content Studio scope and ImageGen visual direction are documented in `docs/r14-admin-content-studio.md`.
-Its server-backed content inventory uses `0016_content_items.sql`; review, scheduling, and approval evidence use
-`0017_publishing_workflow.sql` when PostgreSQL persistence is enabled.
-
-## Product Boundary
-
-OpenPortalKit is a publishing framework, not a CRM, BI platform, trading system, low-code builder, or general data warehouse.
-
-Core code must remain industry-neutral. Pack-specific content types, datasets, validation rules, dashboard cards, and templates belong only in their matching directory under `industry-packs/`.
+OpenPortalKit is licensed under the [MIT License](LICENSE). Public-output-changing actions must remain audited, and all
+structured records must preserve provenance and freshness metadata.

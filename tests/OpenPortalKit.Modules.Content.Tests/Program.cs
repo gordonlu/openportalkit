@@ -19,6 +19,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("server rendered blocks resolve public list and data outputs", ServerRenderedBlocksResolvePublicListAndDataOutputs),
     ("page service fixes template version and audits publication", PageServiceFixesTemplateVersionAndAuditsPublication),
     ("public page listing excludes non-public and future pages", PublicPageListingFiltersAtStoreBoundary),
+    ("public page listing paginates after visibility filtering", PublicPageListingPaginatesAfterVisibilityFiltering),
     ("public query hides drafts archived and expired content", PublicQueryHidesDraftsArchivedAndExpiredContent),
     ("public query paginates after visibility filtering", PublicQueryPaginatesAfterVisibilityFiltering),
     ("public detail list reads bodies without per-item lookup", PublicDetailListReadsVisibleBodies),
@@ -499,6 +500,25 @@ static async Task PublicPageListingFiltersAtStoreBoundary()
 
     Assert.Equal(1, pages.Count);
     Assert.Equal("Visible", pages[0].Title);
+}
+
+static async Task PublicPageListingPaginatesAfterVisibilityFiltering()
+{
+    var store = new InMemoryPageStore();
+    var siteId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 13, 8, 30, 0, TimeSpan.Zero);
+    await store.UpsertAsync(CreatePageForQuery(siteId, "Draft", PortalPageStatus.Draft, null, now));
+    await store.UpsertAsync(CreatePageForQuery(
+        siteId, "Older visible", PortalPageStatus.Published, now.AddMinutes(-2), now));
+    await store.UpsertAsync(CreatePageForQuery(
+        siteId, "Newest visible", PortalPageStatus.Published, now.AddMinutes(-1), now));
+    await store.UpsertAsync(CreatePageForQuery(
+        siteId, "Future", PortalPageStatus.Published, now.AddMinutes(1), now));
+
+    var pages = await new PublicPageQueryService(store).ListPublishedPageAsync(siteId, 1, 1, now);
+
+    Assert.Equal(1, pages.Count);
+    Assert.Equal("Older visible", pages[0].Title);
 }
 
 static PortalPage CreatePageForQuery(
