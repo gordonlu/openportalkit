@@ -5,32 +5,7 @@
 }
 
 <section class="opk-admin-shell">
-    <aside class="opk-sidebar" aria-label="Admin navigation">
-        <a class="opk-brand" asp-page="/Index" aria-label="OpenPortalKit Admin home">
-            <span class="opk-brand-mark">OP</span>
-            <span>
-                <strong>OpenPortalKit</strong>
-                <small>Admin</small>
-            </span>
-        </a>
-
-        <nav class="opk-nav">
-            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
-            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
-            <a class="opk-nav-link" href="#workflow"><span class="opk-nav-icon"></span>Workflow</a>
-            <a class="opk-nav-link" href="#data"><span class="opk-nav-icon"></span>Data</a>
-            <a class="opk-nav-link" href="#search"><span class="opk-nav-icon"></span>Search</a>
-            <a class="opk-nav-link is-active" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
-            <a class="opk-nav-link" href="#audit"><span class="opk-nav-icon"></span>Audit</a>
-            <a class="opk-nav-link" href="#jobs"><span class="opk-nav-icon"></span>Jobs</a>
-            <a class="opk-nav-link" href="#settings"><span class="opk-nav-icon"></span>Settings</a>
-        </nav>
-
-        <div class="opk-sidebar-status">
-            <span class="opk-status-dot is-ok"></span>
-            <span>Core boundary clean</span>
-        </div>
-    </aside>
+    <partial name="_AdminSidebar" />
 
     <div class="opk-workspace">
         <header class="opk-topbar">

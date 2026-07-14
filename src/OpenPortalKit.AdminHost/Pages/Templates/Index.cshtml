@@ -5,16 +5,7 @@
 }
 
 <section class="opk-admin-shell">
-    <aside class="opk-sidebar" aria-label="Admin navigation">
-        <a class="opk-brand" asp-page="/Index"><span class="opk-brand-mark">OP</span><span><strong>OpenPortalKit</strong><small>Admin</small></span></a>
-        <nav class="opk-nav">
-            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
-            <a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
-            <a class="opk-nav-link is-active" asp-page="/Templates/Index"><span class="opk-nav-icon"></span>Templates</a>
-            <a class="opk-nav-link" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
-        </nav>
-        <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>Schema guard active</span></div>
-    </aside>
+    <partial name="_AdminSidebar" />
 
     <div class="opk-workspace">
         <header class="opk-topbar">
@@ -69,7 +60,6 @@
                     <label>Title<input asp-for="NewPage.Title" /></label>
                     <label>Slug<input asp-for="NewPage.Slug" placeholder="public-page" /></label>
                     <label>Summary<textarea asp-for="NewPage.Summary" rows="3"></textarea></label>
-                    <label class="opk-check-label"><input asp-for="NewPage.PublishImmediately" />Publish now</label>
                     <button class="opk-button opk-button-secondary" type="submit">Create page</button>
                 </form>
             </aside>

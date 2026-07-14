@@ -3,6 +3,9 @@ using Npgsql;
 using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
+using OpenPortalKit.Modules.Content.BlockTemplates;
+using OpenPortalKit.Modules.Content.ContentItems;
+using OpenPortalKit.Modules.Workflow.Publishing;
 
 var connectionString = Environment.GetEnvironmentVariable("OPK_POSTGRES_INTEGRATION");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -43,10 +46,16 @@ try
     await OutboxLeaseAndIdempotencyRoundTrip(connectionFactory);
     await AuditRoundTrip(connectionFactory);
     await IdempotencyRoundTrip(connectionFactory);
+    await ContentInventoryRoundTrip(connectionFactory);
+    await PortalPageConcurrencyRoundTrip(connectionFactory);
+    await PublishingWorkflowRoundTrip(connectionFactory);
     Console.WriteLine("PASS PostgreSQL migration is repeatable in an isolated schema");
     Console.WriteLine("PASS PostgreSQL outbox lease and retry behavior round trips");
     Console.WriteLine("PASS PostgreSQL audit metadata round trips");
     Console.WriteLine("PASS PostgreSQL idempotency state round trips");
+    Console.WriteLine("PASS PostgreSQL content inventory filters and traceability round trip");
+    Console.WriteLine("PASS PostgreSQL portal page optimistic concurrency rejects stale writes");
+    Console.WriteLine("PASS PostgreSQL workflow review evidence, scheduling, and concurrency round trip");
     return 0;
 }
 finally
@@ -57,15 +66,156 @@ finally
 
 static async Task ApplyMigrationTwiceAsync(string root, string connectionString)
 {
-    var sql = await File.ReadAllTextAsync(
-        Path.Combine(root, "db", "postgresql", "migrations", "0009_publishing_delivery.sql"));
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync();
-    for (var attempt = 0; attempt < 2; attempt++)
+    foreach (var migration in new[]
     {
-        await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync();
+        "0009_publishing_delivery.sql",
+        "0010_block_templates.sql",
+        "0011_portal_pages.sql",
+        "0012_portal_page_versions.sql",
+        "0016_content_items.sql",
+        "0017_publishing_workflow.sql"
+    })
+    {
+        var sql = await File.ReadAllTextAsync(Path.Combine(root, "db", "postgresql", "migrations", migration));
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await using var command = new NpgsqlCommand(sql, connection);
+            await command.ExecuteNonQueryAsync();
+        }
     }
+}
+
+static async Task PublishingWorkflowRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
+{
+    var workflowStore = new PostgresPublishingWorkflowItemStore(connectionFactory);
+    var approvalStore = new PostgresApprovalRecordStore(connectionFactory);
+    var auditStore = new PostgresAuditLogStore(connectionFactory);
+    var service = new PublishingWorkflowService(
+        new AuditRecorder(auditStore), approvalStore, workflowStore);
+    var actorId = Guid.NewGuid();
+    var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    var draft = PublishingWorkflowItem.CreateDraft(
+        "ContentItem", "workflow-" + Guid.NewGuid().ToString("N"), actorId, now);
+    await workflowStore.AddAsync(draft);
+
+    var review = (await service.TransitionAsync(draft, new WorkflowTransitionRequest(
+        WorkflowAction.SubmitForReview, actorId, OccurredAt: now.AddMinutes(1)))).Item!;
+    var approved = await service.TransitionAsync(review, new WorkflowTransitionRequest(
+        WorkflowAction.Approve,
+        actorId,
+        Comment: "PostgreSQL approval evidence.",
+        OccurredAt: now.AddMinutes(2)));
+    var stale = await service.TransitionAsync(review, new WorkflowTransitionRequest(
+        WorkflowAction.Reject,
+        actorId,
+        Comment: "This stale decision must not persist.",
+        OccurredAt: now.AddMinutes(3)));
+    var scheduledAt = now.AddHours(2);
+    var scheduled = await service.TransitionAsync(approved.Item!, new WorkflowTransitionRequest(
+        WorkflowAction.SchedulePublish,
+        actorId,
+        ScheduledAt: scheduledAt,
+        OccurredAt: now.AddMinutes(4),
+        Readiness: new WorkflowPublicationReadiness(true, true, true)));
+
+    var stored = await workflowStore.FindByTargetAsync(draft.TargetType, draft.TargetId);
+    var notDue = await workflowStore.ListScheduledDueAsync(scheduledAt.AddSeconds(-1), 10);
+    var due = await workflowStore.ListScheduledDueAsync(scheduledAt, 10);
+    var approvals = await approvalStore.FindByTargetAsync(draft.TargetType, draft.TargetId);
+    var audits = await auditStore.FindByTargetAsync(draft.TargetType, draft.TargetId);
+
+    Assert.True(approved.Succeeded, "Current PostgreSQL approval was rejected.");
+    Assert.False(stale.Succeeded, "Stale PostgreSQL review decision was persisted.");
+    Assert.True(scheduled.Succeeded, "Approved PostgreSQL workflow item was not scheduled.");
+    Assert.Equal(scheduledAt, stored?.ScheduledAt, "Scheduled publication time was not persisted.");
+    Assert.Equal(0, notDue.Count, "Scheduled item became due too early.");
+    Assert.Equal(1, due.Count, "Scheduled item was not returned when due.");
+    Assert.Equal(1, approvals.Count, "Stale decision created approval evidence.");
+    Assert.Equal("PostgreSQL approval evidence.", approvals[0].Comment,
+        "Approval comment was not preserved.");
+    Assert.Equal(3, audits.Count, "Workflow transitions did not create the expected audit evidence.");
+}
+
+static async Task PortalPageConcurrencyRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
+{
+    var actorId = Guid.NewGuid();
+    var now = DateTimeOffset.UtcNow;
+    var template = new PageTemplate(
+        Guid.NewGuid(), "integration-page", "Integration page", "Integration template.",
+        PageTemplateStatus.Published, 1,
+        new[] { new BlockInstance(Guid.NewGuid(), "hero", "block.hero.v1", 0, """{"headline":"Integration"}""") },
+        actorId, actorId, now, now);
+    await new PostgresPageTemplateStore(connectionFactory).SaveAsync(template);
+    var store = new PostgresPageStore(connectionFactory);
+    var page = new PortalPage(
+        Guid.NewGuid(), Guid.NewGuid(), template.Id, template.Version, "Concurrency page", "concurrency-page",
+        "A page used to verify optimistic concurrency.", PortalPageStatus.Draft,
+        template.Blocks, actorId, actorId, now, now, null);
+    await store.UpsertAsync(page);
+
+    var updated = page with { Title = "Accepted update", Revision = 2, UpdatedAt = now.AddMinutes(1) };
+    var accepted = await store.TryUpdateAsync(updated, expectedRevision: 1);
+    var stale = await store.TryUpdateAsync(
+        updated with { Title = "Stale update", Revision = 2, UpdatedAt = now.AddMinutes(2) },
+        expectedRevision: 1);
+    var stored = await store.FindBySlugAsync(page.SiteId, page.Slug);
+    var versions = await store.ListVersionsAsync(page.Id);
+
+    Assert.True(accepted, "Current portal page revision was rejected.");
+    Assert.False(stale, "Stale portal page revision overwrote a newer edit.");
+    Assert.Equal("Accepted update", stored?.Title, "Stale portal page content reached storage.");
+    Assert.Equal(2, versions.Count, "Rejected page update created a version snapshot.");
+}
+
+static async Task ContentInventoryRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)
+{
+    var store = new PostgresContentItemStore(connectionFactory);
+    var siteId = Guid.NewGuid();
+    var typeId = Guid.NewGuid();
+    var authorId = Guid.NewGuid();
+    var now = DateTimeOffset.UtcNow;
+    var draft = new ContentItem(
+        Guid.NewGuid(), siteId, typeId, "PostgreSQL authoring guide", "postgresql-authoring-guide",
+        "A durable content draft.", "Draft body.", null, ContentPublicationStatus.Draft, null,
+        new[] { "postgresql", "authoring" }, authorId, "integration-import", null, null, null,
+        authorId, authorId, now.AddMinutes(-2), now.AddMinutes(-1));
+    var published = draft with
+    {
+        Id = Guid.NewGuid(),
+        Title = "Published operations guide",
+        Slug = "published-operations-guide",
+        Status = ContentPublicationStatus.Published,
+        PublishedAt = now.AddMinutes(-3),
+        UpdatedAt = now
+    };
+
+    await store.AddAsync(draft);
+    await store.AddAsync(published);
+    await store.AddAsync(draft with { Summary = "Updated durable content draft.", UpdatedAt = now.AddMinutes(1) });
+
+    var byId = await store.FindByIdAsync(draft.Id);
+    var bySlug = await store.FindBySlugAsync(siteId, published.Slug);
+    var adminPage = await store.ListAdminAsync(new AdminContentListQuery(
+        siteId, "postgresql", ContentPublicationStatus.Draft, typeId, authorId, 0, 10));
+    var tagged = await store.ListAsync(new ContentListQuery(siteId, typeId, Tag: "authoring", Take: 10));
+    var publicPage = await store.ListPublishedAsync(new ContentListQuery(siteId, Take: 1), now);
+    var versions = await store.ListVersionsAsync(draft.Id);
+
+    Assert.Equal("Updated durable content draft.", byId?.Summary,
+        "Content upsert did not preserve the latest authored fields.");
+    Assert.Equal(published.Id, bySlug?.Id, "Content slug lookup failed.");
+    Assert.Equal(1, adminPage.TotalCount, "Admin content filters returned an incorrect total.");
+    Assert.Equal(draft.Id, adminPage.Items[0].Id, "Admin content filters returned the wrong item.");
+    Assert.Equal("integration-import", adminPage.Items[0].Source, "Content source was not preserved.");
+    Assert.Equal(2, tagged.Count, "JSON tag filtering did not return both matching items.");
+    Assert.Equal(published.Id, publicPage[0].Id, "Public pagination was applied before visibility filtering.");
+    Assert.Equal(2, versions.Count, "Content revision history did not retain both writes.");
+    Assert.Equal("Updated durable content draft.", versions[0].Snapshot.Summary,
+        "Latest content revision did not preserve the full snapshot.");
+    Assert.Equal("A durable content draft.", versions[1].Snapshot.Summary,
+        "Earlier content revision was mutated by a later write.");
 }
 
 static async Task OutboxLeaseAndIdempotencyRoundTrip(IOpenPortalKitDbConnectionFactory connectionFactory)

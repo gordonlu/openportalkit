@@ -60,6 +60,46 @@ public sealed class PostgresPageStore : IPageStore
         return page;
     }
 
+    public async Task<bool> TryUpdateAsync(
+        PortalPage page,
+        int expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedRevision);
+
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            update opk_portal_pages
+            set template_id = @template_id,
+                template_version = @template_version,
+                title = @title,
+                slug = @slug,
+                summary = @summary,
+                status = @status,
+                blocks_json = cast(@blocks_json as jsonb),
+                revision = @revision,
+                updated_by = @updated_by,
+                updated_at = @updated_at,
+                published_at = @published_at
+            where id = @id and revision = @expected_revision
+            """;
+        AddParameters(command, page);
+        command.AddParameter("@expected_revision", expectedRevision, DbType.Int32);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            return false;
+        }
+
+        await InsertVersionAsync(connection, transaction, page, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<PortalPage?> FindBySlugAsync(
         Guid siteId,
         string slug,
@@ -73,6 +113,18 @@ public sealed class PostgresPageStore : IPageStore
         command.AddParameter("@site_id", siteId, DbType.Guid);
         command.AddParameter("@slug", slug, DbType.String);
 
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadPage(reader) : null;
+    }
+
+    public async Task<PortalPage?> FindByIdAsync(
+        Guid pageId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectBase + " where id = @id";
+        command.AddParameter("@id", pageId, DbType.Guid);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadPage(reader) : null;
     }
@@ -171,6 +223,26 @@ public sealed class PostgresPageStore : IPageStore
         command.AddParameter("@created_at", page.CreatedAt, DbType.DateTimeOffset);
         command.AddParameter("@updated_at", page.UpdatedAt, DbType.DateTimeOffset);
         command.AddParameter("@published_at", page.PublishedAt, DbType.DateTimeOffset);
+    }
+
+    private static async Task InsertVersionAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        PortalPage page,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            insert into opk_portal_page_versions (page_id, revision, snapshot_json, created_by, created_at)
+            values (@page_id, @revision, cast(@snapshot_json as jsonb), @created_by, @created_at)
+            """;
+        command.AddParameter("@page_id", page.Id, DbType.Guid);
+        command.AddParameter("@revision", page.Revision, DbType.Int32);
+        command.AddParameter("@snapshot_json", JsonSerializer.Serialize(page), DbType.String);
+        command.AddParameter("@created_by", page.UpdatedBy, DbType.Guid);
+        command.AddParameter("@created_at", page.UpdatedAt, DbType.DateTimeOffset);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static PortalPage ReadPage(System.Data.Common.DbDataReader reader)

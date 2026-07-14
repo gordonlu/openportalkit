@@ -7,4 +7,5 @@ public sealed record UpdatePortalPageRequest(
     string Slug,
     string Summary,
     IReadOnlyList<BlockInstance> Blocks,
+    int ExpectedRevision,
     Guid ActorId);

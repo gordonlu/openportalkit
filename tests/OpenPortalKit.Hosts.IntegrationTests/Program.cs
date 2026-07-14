@@ -136,6 +136,81 @@ static async Task AdminHostEnforcesAuthenticationCsrfAndSecureCookies()
     Assert.Contains("samesite=strict", authCookie.ToLowerInvariant());
     Assert.False(authCookie.Contains("domain=", StringComparison.OrdinalIgnoreCase),
         "Host-only authentication cookie unexpectedly declared a Domain.");
+
+    using var contentStudioRequest = new HttpRequestMessage(HttpMethod.Get, "Content");
+    contentStudioRequest.Headers.TryAddWithoutValidation("Cookie", authCookie.Split(';', 2)[0]);
+    using var contentStudio = await client.SendAsync(contentStudioRequest);
+    Assert.Equal(HttpStatusCode.OK, contentStudio.StatusCode);
+    var contentStudioHtml = await contentStudio.Content.ReadAsStringAsync();
+    Assert.Contains("OpenPortalKit", contentStudioHtml);
+    Assert.Contains("Pages &amp; Templates", contentStudioHtml);
+    Assert.Contains("aria-current=\"page\"", contentStudioHtml);
+    Assert.Contains("Version history", contentStudioHtml);
+    Assert.Contains("Revision 1", contentStudioHtml);
+    Assert.False(contentStudioHtml.Contains("href=\"#workflow\"", StringComparison.Ordinal),
+        "Admin navigation still exposes a non-functional workflow anchor.");
+
+    using var formClient = CreateClient(host.BaseUri);
+    using var templatesRequest = new HttpRequestMessage(HttpMethod.Get, "Templates");
+    templatesRequest.Headers.TryAddWithoutValidation("Cookie", authCookie.Split(';', 2)[0]);
+    using var templatesResponse = await formClient.SendAsync(templatesRequest);
+    Assert.Equal(HttpStatusCode.OK, templatesResponse.StatusCode);
+    var templatesHtml = await templatesResponse.Content.ReadAsStringAsync();
+    var templateToken = ExtractAntiforgeryToken(templatesHtml);
+    var antiforgeryCookie = templatesResponse.Headers.GetValues("Set-Cookie")
+        .Select(value => value.Split(';', 2)[0])
+        .Single(value => value.StartsWith(".AspNetCore.Antiforgery.", StringComparison.Ordinal));
+    var adminCookies = authCookie.Split(';', 2)[0] + "; " + antiforgeryCookie;
+
+    using var seedRequest = AuthenticatedPost(
+        "Templates?handler=SeedTemplates",
+        adminCookies,
+        new Dictionary<string, string> { ["__RequestVerificationToken"] = templateToken });
+    using var seedResponse = await formClient.SendAsync(seedRequest);
+    Assert.Equal(HttpStatusCode.Redirect, seedResponse.StatusCode);
+
+    using var createPageRequest = AuthenticatedPost(
+        "Templates?handler=CreatePage",
+        adminCookies,
+        new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = templateToken,
+            ["NewPage.TemplateCode"] = "corporate-homepage",
+            ["NewPage.Title"] = "Integration structured page",
+            ["NewPage.Slug"] = "integration-structured-page",
+            ["NewPage.Summary"] = "A structured editor integration page."
+        });
+    using var createPageResponse = await formClient.SendAsync(createPageRequest);
+    Assert.Equal(HttpStatusCode.Redirect, createPageResponse.StatusCode);
+
+    using var editorRequest = new HttpRequestMessage(
+        HttpMethod.Get, "Templates/PageEdit?slug=integration-structured-page");
+    editorRequest.Headers.TryAddWithoutValidation("Cookie", authCookie.Split(';', 2)[0]);
+    using var editorResponse = await formClient.SendAsync(editorRequest);
+    Assert.Equal(HttpStatusCode.OK, editorResponse.StatusCode);
+    var editorHtml = await editorResponse.Content.ReadAsStringAsync();
+    Assert.Contains("Save revision", editorHtml);
+    Assert.Contains("Expert JSON", editorHtml);
+    Assert.Contains("Headline", editorHtml);
+    Assert.Contains("Action URL", editorHtml);
+    Assert.Contains("name=\"Editor.Revision\"", editorHtml);
+
+    using var draftRequest = new HttpRequestMessage(HttpMethod.Get, "Content?status=Draft");
+    draftRequest.Headers.TryAddWithoutValidation("Cookie", authCookie.Split(';', 2)[0]);
+    using var draftResponse = await client.SendAsync(draftRequest);
+    Assert.Equal(HttpStatusCode.OK, draftResponse.StatusCode);
+    var draftHtml = await draftResponse.Content.ReadAsStringAsync();
+    Assert.Contains("Structured publishing guide", draftHtml);
+    Assert.False(draftHtml.Contains("Service availability announcement", StringComparison.Ordinal),
+        "Admin status filter returned content from another state.");
+    Assert.False(draftHtml.Contains("not valid for PageNumber", StringComparison.Ordinal),
+        "Admin pagination query conflicts with the Razor page route value.");
+
+    using var emptyRequest = new HttpRequestMessage(HttpMethod.Get, "Content?q=no-such-content");
+    emptyRequest.Headers.TryAddWithoutValidation("Cookie", authCookie.Split(';', 2)[0]);
+    using var emptyResponse = await client.SendAsync(emptyRequest);
+    Assert.Equal(HttpStatusCode.OK, emptyResponse.StatusCode);
+    Assert.Contains("No content matches the current filters.", await emptyResponse.Content.ReadAsStringAsync());
 }
 
 static async Task<(string Token, string Html)> GetLoginPageAsync(HttpClient client, string returnUrl)
@@ -158,6 +233,26 @@ static FormUrlEncodedContent Form(string userName, string password, string token
     };
     if (!string.IsNullOrWhiteSpace(token)) fields["__RequestVerificationToken"] = token;
     return new FormUrlEncodedContent(fields);
+}
+
+static string ExtractAntiforgeryToken(string html)
+{
+    var match = Regex.Match(html, "name=\"__RequestVerificationToken\" type=\"hidden\" value=\"([^\"]+)\"");
+    Assert.True(match.Success, "Authenticated form omitted the antiforgery token.");
+    return WebUtility.HtmlDecode(match.Groups[1].Value);
+}
+
+static HttpRequestMessage AuthenticatedPost(
+    string path,
+    string cookies,
+    IReadOnlyDictionary<string, string> fields)
+{
+    var request = new HttpRequestMessage(HttpMethod.Post, path)
+    {
+        Content = new FormUrlEncodedContent(fields)
+    };
+    request.Headers.TryAddWithoutValidation("Cookie", cookies);
+    return request;
 }
 
 static bool HasAuthenticationCookie(HttpResponseMessage response) =>

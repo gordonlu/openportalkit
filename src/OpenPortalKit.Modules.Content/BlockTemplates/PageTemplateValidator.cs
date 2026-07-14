@@ -167,9 +167,13 @@ public static class PageTemplateValidator
 
     private static bool IsRelativeOrAbsoluteUrl(string? value)
     {
-        return !string.IsNullOrWhiteSpace(value) &&
-            (value.StartsWith("/", StringComparison.Ordinal) ||
-             Uri.TryCreate(value, UriKind.Absolute, out _));
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (value.StartsWith("/", StringComparison.Ordinal))
+            return !value.StartsWith("//", StringComparison.Ordinal) &&
+                !value.StartsWith("/\\", StringComparison.Ordinal);
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
     }
 
     private static void ValidateBlockSpecificConfiguration(
@@ -245,7 +249,7 @@ public static class PageTemplateValidator
         if (!item.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String ||
             !IsRelativeOrAbsoluteUrl(value.GetString()))
         {
-            errors.Add($"Block '{blockCode}' list items require a relative or absolute URL '{property}'.");
+            errors.Add($"Block '{blockCode}' list items require a root-relative or HTTP(S) URL '{property}'.");
         }
     }
 
@@ -255,7 +259,7 @@ public static class PageTemplateValidator
         {
             BlockSettingType.Text => "text",
             BlockSettingType.RichText => "rich text",
-            BlockSettingType.Url => "a relative or absolute URL",
+            BlockSettingType.Url => "a root-relative or HTTP(S) URL",
             BlockSettingType.Number => "a number",
             BlockSettingType.Boolean => "a boolean",
             BlockSettingType.ContentQuery => "a content query string",

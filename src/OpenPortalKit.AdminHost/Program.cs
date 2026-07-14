@@ -34,6 +34,7 @@ using OpenPortalKit.Modules.Search;
 using OpenPortalKit.Modules.Seo;
 using OpenPortalKit.Modules.Seo.Revalidation;
 using OpenPortalKit.Modules.Workflow;
+using OpenPortalKit.Modules.Workflow.Publishing;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -100,6 +101,7 @@ if (!string.IsNullOrWhiteSpace(adminAuthentication.DataProtectionKeyPath))
 builder.Services.AddSingleton<PasswordCredentialHasher>();
 builder.Services.AddSingleton<AdminCredentialValidator>();
 builder.Services.AddSingleton<AdminLoginAttemptGuard>();
+builder.Services.AddSingleton<AdminActorContext>();
 var authenticationBuilder = builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
@@ -195,6 +197,12 @@ if (adminAuthentication.Mode == AdminAuthenticationMode.OpenIdConnect)
 }
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy(AdminAuthorizationPolicies.ContentEdit, policy =>
+        policy.RequireAssertion(context => !adminAuthentication.RequireAuthentication ||
+            context.User.Identity?.IsAuthenticated == true && context.User.IsInRole("Administrator")));
+    options.AddPolicy(AdminAuthorizationPolicies.ContentPublish, policy =>
+        policy.RequireAssertion(context => !adminAuthentication.RequireAuthentication ||
+            context.User.Identity?.IsAuthenticated == true && context.User.IsInRole("Administrator")));
     if (adminAuthentication.RequireAuthentication)
     {
         options.FallbackPolicy = new AuthorizationPolicyBuilder()
@@ -211,7 +219,6 @@ builder.Services.Configure<AnalyticsPrivacyOptions>(
     builder.Configuration.GetSection(AnalyticsPrivacyOptions.SectionName));
 builder.Services.Configure<DashboardSummaryOptions>(
     builder.Configuration.GetSection(DashboardSummaryOptions.SectionName));
-builder.Services.AddSingleton<IContentItemStore, InMemoryContentItemStore>();
 builder.Services.AddSingleton<IDataSetStore, InMemoryDataSetStore>();
 builder.Services.AddSingleton<IDataRecordStore, InMemoryDataRecordStore>();
 builder.Services.AddSingleton<IAgentReadinessSignalProvider, ContentAgentReadinessSignalProvider>();
@@ -285,24 +292,33 @@ else
 if (persistencePostgres.Enabled)
 {
     builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
+    builder.Services.AddSingleton<IContentItemStore, PostgresContentItemStore>();
     builder.Services.AddSingleton<IOutboxMessageStore, PostgresOutboxMessageStore>();
     builder.Services.AddSingleton<IIdempotencyStore, PostgresIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, PostgresAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, PostgresPublicOutputRevalidationStore>();
     builder.Services.AddSingleton<IIndustryPackInstallationStore, PostgresIndustryPackInstallationStore>();
     builder.Services.AddSingleton<ILegacyMigrationBatchStore, PostgresLegacyMigrationBatchStore>();
+    builder.Services.AddSingleton<IPublishingWorkflowItemStore, PostgresPublishingWorkflowItemStore>();
+    builder.Services.AddSingleton<IApprovalRecordStore, PostgresApprovalRecordStore>();
 }
 else
 {
+    builder.Services.AddSingleton<IContentItemStore>(_ => builder.Environment.IsDevelopment()
+        ? DevelopmentContentStoreFactory.Create()
+        : new InMemoryContentItemStore());
     builder.Services.AddSingleton<IOutboxMessageStore, InMemoryOutboxMessageStore>();
     builder.Services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
     builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
     builder.Services.AddSingleton<IPublicOutputRevalidationStore, InMemoryPublicOutputRevalidationStore>();
     builder.Services.AddSingleton<IIndustryPackInstallationStore, InMemoryIndustryPackInstallationStore>();
     builder.Services.AddSingleton<ILegacyMigrationBatchStore, InMemoryLegacyMigrationBatchStore>();
+    builder.Services.AddSingleton<IPublishingWorkflowItemStore, InMemoryPublishingWorkflowItemStore>();
+    builder.Services.AddSingleton<IApprovalRecordStore, InMemoryApprovalRecordStore>();
 }
 
 builder.Services.AddSingleton<AuditRecorder>();
+builder.Services.AddSingleton<PublishingWorkflowService>();
 builder.Services.AddSingleton<IBlockDefinitionCatalog, PredefinedBlockCatalog>();
 if (persistencePostgres.Enabled)
 {

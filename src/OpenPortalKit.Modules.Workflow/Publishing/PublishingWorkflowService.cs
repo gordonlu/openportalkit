@@ -7,13 +7,16 @@ public sealed class PublishingWorkflowService
 {
     private readonly AuditRecorder _auditRecorder;
     private readonly IApprovalRecordStore? _approvalRecordStore;
+    private readonly IPublishingWorkflowItemStore? _workflowItemStore;
 
     public PublishingWorkflowService(
         AuditRecorder auditRecorder,
-        IApprovalRecordStore? approvalRecordStore = null)
+        IApprovalRecordStore? approvalRecordStore = null,
+        IPublishingWorkflowItemStore? workflowItemStore = null)
     {
         _auditRecorder = auditRecorder ?? throw new ArgumentNullException(nameof(auditRecorder));
         _approvalRecordStore = approvalRecordStore;
+        _workflowItemStore = workflowItemStore;
     }
 
     public async Task<WorkflowTransitionResult> TransitionAsync(
@@ -34,6 +37,13 @@ public sealed class PublishingWorkflowService
 
         var updated = Apply(item, request, occurredAt);
 
+        if (_workflowItemStore is not null && !await _workflowItemStore.TryUpdateAsync(
+            updated, item.State, item.UpdatedAt, cancellationToken))
+        {
+            return WorkflowTransitionResult.Failure(
+                "Workflow item changed while this action was being applied. Reload it and try again.");
+        }
+
         await RecordAuditAsync(item, updated, request, occurredAt, cancellationToken);
         await RecordApprovalAsync(item, updated, request, occurredAt, cancellationToken);
         return WorkflowTransitionResult.Success(updated);
@@ -45,6 +55,11 @@ public sealed class PublishingWorkflowService
         DateTimeOffset occurredAt)
     {
         var errors = new List<string>();
+
+        if (occurredAt <= item.UpdatedAt)
+        {
+            errors.Add("Workflow action time must be later than the current workflow update time.");
+        }
 
         if (!AllowedActions(item.State).Contains(request.Action))
         {
@@ -61,6 +76,11 @@ public sealed class PublishingWorkflowService
             string.IsNullOrWhiteSpace(request.Comment))
         {
             errors.Add("Requested changes must include a review comment.");
+        }
+
+        if (request.Comment?.Length > 2000)
+        {
+            errors.Add("Review comments cannot exceed 2000 characters.");
         }
 
         if (request.Action == WorkflowAction.SchedulePublish)

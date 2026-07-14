@@ -5,11 +5,15 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("content can move through review approval and publish", ContentCanMoveThroughReviewApprovalAndPublish),
     ("rejections require review comments", RejectionsRequireReviewComments),
+    ("review comments are bounded", ReviewCommentsAreBounded),
     ("publish requires title slug and summary readiness", PublishRequiresTitleSlugAndSummaryReadiness),
     ("schedule publish requires future scheduled time", SchedulePublishRequiresFutureScheduledTime),
     ("archive hides public state and restore creates new draft version", ArchiveHidesPublicStateAndRestoreCreatesNewDraftVersion),
     ("workflow actions are queryable in audit log", WorkflowActionsAreQueryableInAuditLog),
-    ("review actions create approval records", ReviewActionsCreateApprovalRecords)
+    ("review actions create approval records", ReviewActionsCreateApprovalRecords),
+    ("durable workflow rejects stale transitions and exposes due schedules", DurableWorkflowRejectsStaleTransitionsAndExposesDueSchedules),
+    ("scheduled processor retries target failures and publishes once", ScheduledProcessorRetriesTargetFailuresAndPublishesOnce),
+    ("workflow migration defines durable review and scheduling contracts", WorkflowMigrationDefinesDurableContracts)
 };
 
 var failed = 0;
@@ -73,6 +77,21 @@ static async Task RejectionsRequireReviewComments()
 
     Assert.False(result.Succeeded, "Expected reject transition to fail without comment.");
     Assert.Contains("Rejected content must include a review comment.", result.Errors);
+}
+
+static async Task ReviewCommentsAreBounded()
+{
+    var service = CreateService(out _);
+    var actorId = Guid.NewGuid();
+    var item = PublishingWorkflowItem.CreateDraft("ContentItem", "bounded-comment", actorId);
+    item = (await service.TransitionAsync(item, new WorkflowTransitionRequest(
+        WorkflowAction.SubmitForReview, actorId))).Item!;
+
+    var result = await service.TransitionAsync(item, new WorkflowTransitionRequest(
+        WorkflowAction.Approve, actorId, Comment: new string('x', 2001)));
+
+    Assert.False(result.Succeeded, "Expected an oversized review comment to be rejected.");
+    Assert.Contains("Review comments cannot exceed 2000 characters.", result.Errors);
 }
 
 static async Task PublishRequiresTitleSlugAndSummaryReadiness()
@@ -183,6 +202,102 @@ static async Task ReviewActionsCreateApprovalRecords()
     Assert.Contains(WorkflowAction.Approve, actions);
 }
 
+static async Task DurableWorkflowRejectsStaleTransitionsAndExposesDueSchedules()
+{
+    var auditStore = new InMemoryAuditLogStore();
+    var approvalStore = new InMemoryApprovalRecordStore();
+    var workflowStore = new InMemoryPublishingWorkflowItemStore();
+    var service = new PublishingWorkflowService(
+        new AuditRecorder(auditStore), approvalStore, workflowStore);
+    var actorId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 14, 8, 0, 0, TimeSpan.Zero);
+    var draft = PublishingWorkflowItem.CreateDraft("ContentItem", "durable-content", actorId, now);
+    await workflowStore.AddAsync(draft);
+
+    var review = (await service.TransitionAsync(draft, new WorkflowTransitionRequest(
+        WorkflowAction.SubmitForReview, actorId, OccurredAt: now.AddMinutes(1)))).Item!;
+    var firstApproval = await service.TransitionAsync(review, new WorkflowTransitionRequest(
+        WorkflowAction.Approve, actorId, Comment: "Approved with evidence.", OccurredAt: now.AddMinutes(2)));
+    var staleApproval = await service.TransitionAsync(review, new WorkflowTransitionRequest(
+        WorkflowAction.Approve, actorId, Comment: "Stale approval.", OccurredAt: now.AddMinutes(3)));
+
+    Assert.True(firstApproval.Succeeded, "Expected the current approval transition to persist.");
+    Assert.False(staleApproval.Succeeded, "Expected the stale approval transition to be rejected.");
+    Assert.Contains("Workflow item changed while this action was being applied. Reload it and try again.", staleApproval.Errors);
+
+    var scheduledAt = now.AddDays(1);
+    var scheduled = await service.TransitionAsync(firstApproval.Item!, new WorkflowTransitionRequest(
+        WorkflowAction.SchedulePublish,
+        actorId,
+        ScheduledAt: scheduledAt,
+        OccurredAt: now.AddMinutes(4),
+        Readiness: new WorkflowPublicationReadiness(true, true, true)));
+    var beforeDue = await workflowStore.ListScheduledDueAsync(scheduledAt.AddSeconds(-1), 10);
+    var due = await workflowStore.ListScheduledDueAsync(scheduledAt, 10);
+    var approvals = await approvalStore.FindByTargetAsync("ContentItem", "durable-content");
+    var audit = await auditStore.FindByTargetAsync("ContentItem", "durable-content");
+
+    Assert.True(scheduled.Succeeded, "Expected the approved item to be scheduled.");
+    Assert.Equal(0, beforeDue.Count);
+    Assert.Equal(1, due.Count);
+    Assert.Equal("durable-content", due[0].TargetId);
+    Assert.Equal(1, approvals.Count);
+    Assert.Equal("Approved with evidence.", approvals[0].Comment);
+    Assert.Equal(3, audit.Count);
+}
+
+static Task WorkflowMigrationDefinesDurableContracts()
+{
+    var sql = File.ReadAllText(Path.Combine(
+        "db", "postgresql", "migrations", "0017_publishing_workflow.sql"));
+
+    Assert.Contains("create table if not exists opk_publishing_workflow_items", sql);
+    Assert.Contains("constraint uq_opk_publishing_workflow_target unique (target_type, target_id)", sql);
+    Assert.Contains("create index if not exists ix_opk_publishing_workflow_due", sql);
+    Assert.Contains("create table if not exists opk_approval_records", sql);
+    Assert.Contains("workflow_item_id uuid not null references opk_publishing_workflow_items(id)", sql);
+    Assert.Contains("constraint ck_opk_approval_action", sql);
+    return Task.CompletedTask;
+}
+
+static async Task ScheduledProcessorRetriesTargetFailuresAndPublishesOnce()
+{
+    var workflowStore = new InMemoryPublishingWorkflowItemStore();
+    var auditStore = new InMemoryAuditLogStore();
+    var service = new PublishingWorkflowService(
+        new AuditRecorder(auditStore), new InMemoryApprovalRecordStore(), workflowStore);
+    var actorId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 14, 9, 0, 0, TimeSpan.Zero);
+    var draft = PublishingWorkflowItem.CreateDraft("PortalPage", Guid.NewGuid().ToString("D"), actorId, now);
+    await workflowStore.AddAsync(draft);
+    var review = (await service.TransitionAsync(draft, new WorkflowTransitionRequest(
+        WorkflowAction.SubmitForReview, actorId, OccurredAt: now.AddMinutes(1)))).Item!;
+    var approved = (await service.TransitionAsync(review, new WorkflowTransitionRequest(
+        WorkflowAction.Approve, actorId, OccurredAt: now.AddMinutes(2)))).Item!;
+    var dueAt = now.AddHours(1);
+    await service.TransitionAsync(approved, new WorkflowTransitionRequest(
+        WorkflowAction.SchedulePublish,
+        actorId,
+        ScheduledAt: dueAt,
+        OccurredAt: now.AddMinutes(3),
+        Readiness: new WorkflowPublicationReadiness(true, true, true)));
+
+    var target = new RecordingScheduledTarget("PortalPage") { Fail = true };
+    var processor = new ScheduledPublishingProcessor(workflowStore, service, new[] { target });
+    var failed = await processor.ProcessDueAsync(dueAt, 10, actorId);
+    target.Fail = false;
+    var published = await processor.ProcessDueAsync(dueAt.AddSeconds(1), 10, actorId);
+    var repeated = await processor.ProcessDueAsync(dueAt.AddSeconds(2), 10, actorId);
+    var stored = await workflowStore.FindByTargetAsync(draft.TargetType, draft.TargetId);
+
+    Assert.Equal(1, failed.Failures.Count);
+    Assert.Equal(0, failed.PublishedCount);
+    Assert.Equal(1, published.PublishedCount);
+    Assert.Equal(0, repeated.DueCount);
+    Assert.Equal(2, target.CallCount);
+    Assert.Equal(WorkflowState.Published, stored?.State);
+}
+
 static PublishingWorkflowService CreateService(out InMemoryAuditLogStore auditStore)
 {
     auditStore = new InMemoryAuditLogStore();
@@ -200,6 +315,14 @@ static PublishingWorkflowService CreateServiceWithApprovalStore(
 
 internal static class Assert
 {
+    public static void Contains(string expected, string actual)
+    {
+        if (!actual.Contains(expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected output to contain '{expected}'.");
+        }
+    }
+
     public static void Equal<T>(T expected, T actual)
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -230,5 +353,25 @@ internal static class Assert
         {
             throw new InvalidOperationException($"Expected output to contain '{expected}'.");
         }
+    }
+}
+
+internal sealed class RecordingScheduledTarget : IScheduledPublishingTarget
+{
+    public RecordingScheduledTarget(string targetType) => TargetType = targetType;
+
+    public string TargetType { get; }
+    public bool Fail { get; set; }
+    public int CallCount { get; private set; }
+
+    public Task<ScheduledPublishingTargetResult> PublishAsync(
+        string targetId,
+        Guid actorId,
+        CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        return Task.FromResult(Fail
+            ? ScheduledPublishingTargetResult.Failure("Target is temporarily unavailable.")
+            : ScheduledPublishingTargetResult.Success());
     }
 }

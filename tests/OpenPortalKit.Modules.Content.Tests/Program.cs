@@ -10,6 +10,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("publish rejects content without summary", PublishRejectsContentWithoutSummary),
     ("publish creates version audit log and outbox message", PublishCreatesVersionAuditLogAndOutboxMessage),
     ("block templates reject unsupported configuration", BlockTemplatesRejectUnsupportedConfiguration),
+    ("block URL settings reject executable and protocol-relative targets", BlockUrlsRejectUnsafeTargets),
     ("block template catalog covers the R9 predefined block set", BlockTemplateCatalogCoversPredefinedBlockSet),
     ("block template seeds validate against the catalog", BlockTemplateSeedsValidateAgainstCatalog),
     ("block template service versions and audits saved templates", BlockTemplateServiceVersionsAndAuditsSavedTemplates),
@@ -19,8 +20,11 @@ var tests = new (string Name, Func<Task> Run)[]
     ("page service fixes template version and audits publication", PageServiceFixesTemplateVersionAndAuditsPublication),
     ("public page listing excludes non-public and future pages", PublicPageListingFiltersAtStoreBoundary),
     ("public query hides drafts archived and expired content", PublicQueryHidesDraftsArchivedAndExpiredContent),
+    ("public query paginates after visibility filtering", PublicQueryPaginatesAfterVisibilityFiltering),
     ("public detail list reads bodies without per-item lookup", PublicDetailListReadsVisibleBodies),
-    ("public query resolves published detail by slug", PublicQueryResolvesPublishedDetailBySlug)
+    ("public query resolves published detail by slug", PublicQueryResolvesPublishedDetailBySlug),
+    ("admin content query filters and paginates with total count", AdminContentQueryFiltersAndPaginates),
+    ("content store retains immutable revision history", ContentStoreRetainsImmutableRevisionHistory)
 };
 
 var failed = 0;
@@ -87,6 +91,54 @@ static async Task PublishCreatesVersionAuditLogAndOutboxMessage()
     Assert.Equal(publishedAt, payload.RootElement.GetProperty("PublishedAt").GetDateTimeOffset());
 }
 
+static async Task AdminContentQueryFiltersAndPaginates()
+{
+    var store = new InMemoryContentItemStore();
+    var siteId = Guid.NewGuid();
+    await store.AddAsync(CreateContent(siteId, "Alpha launch", "alpha-launch", ContentPublicationStatus.Draft, null));
+    await store.AddAsync(CreateContent(siteId, "Beta launch", "beta-launch", ContentPublicationStatus.Draft, null));
+    await store.AddAsync(CreateContent(siteId, "Published notes", "published-notes", ContentPublicationStatus.Published, DateTimeOffset.UtcNow));
+
+    var firstPage = await store.ListAdminAsync(new AdminContentListQuery(
+        SiteId: siteId,
+        Search: "launch",
+        Status: ContentPublicationStatus.Draft,
+        Take: 1));
+    var secondPage = await store.ListAdminAsync(new AdminContentListQuery(
+        SiteId: siteId,
+        Search: "launch",
+        Status: ContentPublicationStatus.Draft,
+        Skip: 1,
+        Take: 1));
+
+    Assert.Equal(2, firstPage.TotalCount);
+    Assert.Equal(1, firstPage.Items.Count);
+    Assert.Equal("Alpha launch", firstPage.Items[0].Title);
+    Assert.Equal("Beta launch", secondPage.Items[0].Title);
+}
+
+static async Task ContentStoreRetainsImmutableRevisionHistory()
+{
+    var store = new InMemoryContentItemStore();
+    var item = CreateContent(
+        Guid.NewGuid(), "Revision one", "revision-one", ContentPublicationStatus.Draft, null);
+    await store.AddAsync(item);
+    await store.AddAsync(item with
+    {
+        Title = "Revision two",
+        UpdatedBy = Guid.NewGuid(),
+        UpdatedAt = item.UpdatedAt.AddMinutes(1)
+    });
+
+    var versions = await store.ListVersionsAsync(item.Id);
+
+    Assert.Equal(2, versions.Count);
+    Assert.Equal(2, versions[0].Revision);
+    Assert.Equal("Revision two", versions[0].Snapshot.Title);
+    Assert.Equal(1, versions[1].Revision);
+    Assert.Equal("Revision one", versions[1].Snapshot.Title);
+}
+
 static Task BlockTemplatesRejectUnsupportedConfiguration()
 {
     var catalog = new PredefinedBlockCatalog();
@@ -101,6 +153,33 @@ static Task BlockTemplatesRejectUnsupportedConfiguration()
 
     Assert.False(result.IsValid, "Expected unsupported block configuration to be rejected.");
     Assert.Contains("does not allow configuration field 'customCss'", result.Errors);
+    return Task.CompletedTask;
+}
+
+static Task BlockUrlsRejectUnsafeTargets()
+{
+    var catalog = new PredefinedBlockCatalog();
+    PageTemplate TemplateWithUrl(string url) => CreateTemplate(new BlockInstance(
+        Guid.NewGuid(),
+        "link-list",
+        "block.link-list.v1",
+        0,
+        JsonSerializer.Serialize(new
+        {
+            links = new[] { new { label = "Unsafe", url } }
+        })));
+
+    var script = PageTemplateValidator.Validate(TemplateWithUrl("javascript:alert(1)"), catalog);
+    var protocolRelative = PageTemplateValidator.Validate(TemplateWithUrl("//attacker.example/file"), catalog);
+    var publicHttps = PageTemplateValidator.Validate(TemplateWithUrl("https://example.test/file"), catalog);
+    var local = PageTemplateValidator.Validate(TemplateWithUrl("/downloads/file.pdf"), catalog);
+
+    Assert.False(script.IsValid, "Executable URL scheme was accepted.");
+    Assert.False(protocolRelative.IsValid, "Protocol-relative external URL was accepted.");
+    Assert.True(script.Errors.Any(error => error.Contains("root-relative or HTTP(S) URL", StringComparison.Ordinal)),
+        "Unsafe URL error did not describe the accepted URL policy.");
+    Assert.True(publicHttps.IsValid, "HTTPS URL should be accepted.");
+    Assert.True(local.IsValid, "Root-relative URL should be accepted.");
     return Task.CompletedTask;
 }
 
@@ -210,6 +289,16 @@ static Task BlockTemplateMigrationPreservesSerializedVersionHistory()
     Assert.Contains("ix_opk_portal_pages_public_site_title", performanceSql);
     Assert.Contains("where status = 'Published'", performanceSql);
 
+    var contentSql = File.ReadAllText(Path.Combine(
+        "db", "postgresql", "migrations", "0016_content_items.sql"));
+    Assert.Contains("create table if not exists opk_content_items", contentSql);
+    Assert.Contains("tags_json jsonb not null", contentSql);
+    Assert.Contains("uq_opk_content_items_site_slug", contentSql);
+    Assert.Contains("ix_opk_content_items_site_status_updated", contentSql);
+    Assert.Contains("create table if not exists opk_content_item_versions", contentSql);
+    Assert.Contains("snapshot_json jsonb not null", contentSql);
+    Assert.Contains("primary key (content_item_id, revision)", contentSql);
+
     var postgresPageStore = File.ReadAllText(Path.Combine(
         "src", "OpenPortalKit.Modules.Content", "BlockTemplates", "PostgresPageStore.cs"));
     Assert.Contains("and status = 'Published'", postgresPageStore);
@@ -224,6 +313,7 @@ static Task BlockTemplateMigrationPreservesSerializedVersionHistory()
     Assert.Contains("InMemoryPageTemplateStore", adminProgram);
     Assert.Contains("PostgresPageStore", adminProgram);
     Assert.Contains("InMemoryPageStore", adminProgram);
+    Assert.Contains("PostgresContentItemStore", adminProgram);
     return Task.CompletedTask;
 }
 
@@ -327,6 +417,16 @@ static async Task PageServiceFixesTemplateVersionAndAuditsPublication()
         "portal-overview",
         "An updated public portal overview.",
         published.Page!.Blocks,
+        published.Page.Revision,
+        actorId));
+    var staleUpdate = await pageService.UpdateAsync(new UpdatePortalPageRequest(
+        siteId,
+        "portal-overview",
+        "Stale portal overview",
+        "portal-overview",
+        "This edit was based on an older revision.",
+        published.Page.Blocks,
+        published.Page.Revision,
         actorId));
     var publicPage = await new PublicPageQueryService(pageStore)
         .FindPublishedBySlugAsync(siteId, "portal-overview", now);
@@ -341,6 +441,8 @@ static async Task PageServiceFixesTemplateVersionAndAuditsPublication()
     Assert.Equal(PortalPageStatus.Published, published.Page?.Status);
     Assert.Equal("Portal overview updated", publicPage?.Title);
     Assert.Equal(3, updated.Page?.Revision);
+    Assert.False(staleUpdate.Succeeded, "A stale page edit should be rejected.");
+    Assert.Contains("changed after it was opened", staleUpdate.Errors[0]);
     Assert.Equal(3, versions.Count);
     Assert.Equal(3, auditLogs.Count);
     Assert.Equal("portal-page.updated", auditLogs[0].Action);
@@ -365,6 +467,23 @@ static async Task PublicQueryHidesDraftsArchivedAndExpiredContent()
 
     Assert.Equal(1, visible.Count);
     Assert.Equal("published", visible[0].Slug);
+}
+
+static async Task PublicQueryPaginatesAfterVisibilityFiltering()
+{
+    var store = new InMemoryContentItemStore();
+    var siteId = Guid.NewGuid();
+    var now = new DateTimeOffset(2026, 7, 6, 10, 0, 0, TimeSpan.Zero);
+    await store.AddAsync(CreateContent(
+        siteId, "Newest draft", "newest-draft", ContentPublicationStatus.Draft, null) with { UpdatedAt = now });
+    await store.AddAsync(CreateContent(
+        siteId, "Visible item", "visible-item", ContentPublicationStatus.Published, now.AddMinutes(-1)));
+
+    var visible = await new PublicContentQueryService(store).ListPublishedAsync(
+        new ContentListQuery(SiteId: siteId, Take: 1), now);
+
+    Assert.Equal(1, visible.Count);
+    Assert.Equal("visible-item", visible[0].Slug);
 }
 
 static async Task PublicPageListingFiltersAtStoreBoundary()

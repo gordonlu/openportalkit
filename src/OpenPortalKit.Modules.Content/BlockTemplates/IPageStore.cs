@@ -4,7 +4,14 @@ public interface IPageStore
 {
     Task<PortalPage> UpsertAsync(PortalPage page, CancellationToken cancellationToken = default);
 
+    Task<bool> TryUpdateAsync(
+        PortalPage page,
+        int expectedRevision,
+        CancellationToken cancellationToken = default);
+
     Task<PortalPage?> FindBySlugAsync(Guid siteId, string slug, CancellationToken cancellationToken = default);
+
+    Task<PortalPage?> FindByIdAsync(Guid pageId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<PortalPage>> ListAsync(Guid? siteId = null, CancellationToken cancellationToken = default);
 

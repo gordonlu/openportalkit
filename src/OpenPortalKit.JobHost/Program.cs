@@ -9,7 +9,9 @@ using OpenPortalKit.Kernel.Audit;
 using OpenPortalKit.Kernel.Events;
 using OpenPortalKit.Kernel.Persistence;
 using OpenPortalKit.Modules.AgentAccess.AgentOutputs;
+using OpenPortalKit.Modules.Content.BlockTemplates;
 using OpenPortalKit.Modules.Seo.Revalidation;
+using OpenPortalKit.Modules.Workflow.Publishing;
 
 var builder = Host.CreateApplicationBuilder(args);
 DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
@@ -49,6 +51,10 @@ var workerOptions = builder.Configuration
     .GetSection(OutboxWorkerOptions.SectionName)
     .Get<OutboxWorkerOptions>() ?? new OutboxWorkerOptions();
 workerOptions.Validate();
+var scheduledPublishingOptions = builder.Configuration
+    .GetSection(ScheduledPublishingWorkerOptions.SectionName)
+    .Get<ScheduledPublishingWorkerOptions>() ?? new ScheduledPublishingWorkerOptions();
+scheduledPublishingOptions.Validate();
 builder.Services.Configure<HostOptions>(options =>
     options.ShutdownTimeout = TimeSpan.FromSeconds(workerOptions.ShutdownTimeoutSeconds));
 
@@ -56,6 +62,7 @@ builder.Services.AddSingleton(persistenceOptions);
 builder.Services.AddSingleton(agentOutputOptions);
 builder.Services.AddSingleton(outputGenerationOptions);
 builder.Services.AddSingleton(workerOptions);
+builder.Services.AddSingleton(scheduledPublishingOptions);
 builder.Services.AddSingleton<IOpenPortalKitDbConnectionFactory, PostgresOpenPortalKitDbConnectionFactory>();
 builder.Services.AddSingleton<IOutboxMessageStore, PostgresOutboxMessageStore>();
 builder.Services.AddSingleton<IIdempotencyStore, PostgresIdempotencyStore>();
@@ -64,6 +71,15 @@ builder.Services.AddSingleton<IPublicOutputRevalidationStore, PostgresPublicOutp
 builder.Services.AddSingleton<IAgentOutputDbConnectionFactory, AgentOutputPostgresConnectionFactory>();
 builder.Services.AddSingleton<IAgentOutputArtifactStore, PostgresAgentOutputArtifactStore>();
 builder.Services.AddSingleton<AuditRecorder>();
+builder.Services.AddSingleton<IPageTemplateStore, PostgresPageTemplateStore>();
+builder.Services.AddSingleton<IPageStore, PostgresPageStore>();
+builder.Services.AddSingleton<IBlockDefinitionCatalog, PredefinedBlockCatalog>();
+builder.Services.AddSingleton<PortalPageService>();
+builder.Services.AddSingleton<IPublishingWorkflowItemStore, PostgresPublishingWorkflowItemStore>();
+builder.Services.AddSingleton<IApprovalRecordStore, PostgresApprovalRecordStore>();
+builder.Services.AddSingleton<PublishingWorkflowService>();
+builder.Services.AddSingleton<IScheduledPublishingTarget, PortalPageScheduledPublishingTarget>();
+builder.Services.AddSingleton<ScheduledPublishingProcessor>();
 builder.Services.AddSingleton<IAgentContentDocumentResolver, PublishingEventAgentContentDocumentResolver>();
 builder.Services.AddSingleton<PublishingAgentOutputArtifactFactory>();
 builder.Services.AddSingleton<IPublicOutputRegenerator>(provider =>
@@ -79,6 +95,7 @@ builder.Services.AddSingleton<PublishingRevalidationPlanner>();
 builder.Services.AddSingleton<IOutboxMessageHandler, PublishingRevalidationOutboxHandler>();
 builder.Services.AddSingleton<OutboxProcessor>();
 builder.Services.AddHostedService<PublishingOutboxWorker>();
+builder.Services.AddHostedService<ScheduledPublishingWorker>();
 
 await builder.Build().RunAsync();
 

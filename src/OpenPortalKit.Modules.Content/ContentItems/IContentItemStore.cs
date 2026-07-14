@@ -14,4 +14,17 @@ public interface IContentItemStore
     Task<IReadOnlyList<ContentItem>> ListAsync(
         ContentListQuery query,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ContentItem>> ListPublishedAsync(
+        ContentListQuery query,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminContentListPage> ListAdminAsync(
+        AdminContentListQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ContentItemRevision>> ListVersionsAsync(
+        Guid contentItemId,
+        CancellationToken cancellationToken = default);
 }

@@ -27,6 +27,8 @@ The project is initialized as a modular monolith. The core is industry-neutral; 
 - R9 versioned block template migration in `db/postgresql/migrations/0010_block_templates.sql`
 - R9 portal page migration in `db/postgresql/migrations/0011_portal_pages.sql`
 - R9 immutable portal page revision migration in `db/postgresql/migrations/0012_portal_page_versions.sql`
+- R14 durable content inventory and revisions in `db/postgresql/migrations/0016_content_items.sql`
+- R14 durable publishing workflow, due schedules, and approval evidence in `db/postgresql/migrations/0017_publishing_workflow.sql`
 - R7 PostgreSQL dashboard/analytics migration script in `db/postgresql/migrations/0007_dashboard_analytics.sql`
 - Local PostgreSQL and Redis compose services with development connection string conventions
 - Separate module projects for content, assets, workflow, data, search, SEO, agent access, dashboard, audit, identity, and jobs
@@ -155,6 +157,9 @@ R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
 R11 production hardening notes are in `docs/r11-production-hardening.md`.
 R12 stabilization status and the 1.0 acceptance matrix are in `docs/r12-developer-experience.md`.
 R13 source workspace scaffolding is documented in `docs/r13-project-scaffolding.md`.
+R14 Admin Content Studio scope and ImageGen visual direction are documented in `docs/r14-admin-content-studio.md`.
+Its server-backed content inventory uses `0016_content_items.sql`; review, scheduling, and approval evidence use
+`0017_publishing_workflow.sql` when PostgreSQL persistence is enabled.
 
 ## Product Boundary
 

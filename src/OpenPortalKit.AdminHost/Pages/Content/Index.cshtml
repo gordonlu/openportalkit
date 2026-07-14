@@ -1,219 +1,144 @@
-﻿@page
+@page
 @model OpenPortalKit.AdminHost.Pages.Content.IndexModel
+@using OpenPortalKit.Modules.Content.ContentItems
 @{
-    ViewData["Title"] = "Content Workbench";
+    ViewData["Title"] = "Content Studio";
+    string StatusClass(ContentPublicationStatus status) => status switch
+    {
+        ContentPublicationStatus.Review => "is-review",
+        ContentPublicationStatus.Approved or ContentPublicationStatus.Published => "is-approved",
+        ContentPublicationStatus.Rejected => "is-critical",
+        ContentPublicationStatus.Draft or ContentPublicationStatus.Archived => "is-draft",
+        _ => "is-draft"
+    };
 }
 
 <section class="opk-admin-shell">
-    <aside class="opk-sidebar" aria-label="Admin navigation">
-        <a class="opk-brand" asp-page="/Index" aria-label="OpenPortalKit Admin home">
-            <span class="opk-brand-mark">OP</span>
-            <span>
-                <strong>OpenPortalKit</strong>
-                <small>Admin</small>
-            </span>
-        </a>
-
-        <nav class="opk-nav">
-            <a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a>
-            <a class="opk-nav-link is-active" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a>
-            <a class="opk-nav-link" href="#workflow"><span class="opk-nav-icon"></span>Workflow</a>
-            <a class="opk-nav-link" href="#data"><span class="opk-nav-icon"></span>Data</a>
-            <a class="opk-nav-link" href="#search"><span class="opk-nav-icon"></span>Search</a>
-            <a class="opk-nav-link" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a>
-            <a class="opk-nav-link" href="#audit"><span class="opk-nav-icon"></span>Audit</a>
-            <a class="opk-nav-link" href="#jobs"><span class="opk-nav-icon"></span>Jobs</a>
-            <a class="opk-nav-link" href="#settings"><span class="opk-nav-icon"></span>Settings</a>
-        </nav>
-
-        <div class="opk-sidebar-status">
-            <span class="opk-status-dot is-ok"></span>
-            <span>Core boundary clean</span>
-        </div>
-    </aside>
+    <partial name="_AdminSidebar" />
 
     <div class="opk-workspace">
         <header class="opk-topbar">
             <div>
-                <h1>Content Workbench</h1>
-                <p>Drafts, review state, public outputs, versions, and audit readiness.</p>
+                <h1>Content Studio</h1>
+                <p>Drafts, review state, public outputs, source traceability, and publication status.</p>
             </div>
-            <div class="opk-topbar-actions">
-                <button class="opk-button opk-button-secondary" type="button">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                    New Draft
-                </button>
-                <button class="opk-button opk-button-secondary" type="button">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" /></svg>
-                    Import
-                </button>
-                <button class="opk-button opk-button-primary" type="button">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-                    Review Queue
-                </button>
-            </div>
+            <div class="opk-content-count" aria-live="polite"><strong>@Model.TotalCount</strong><span>matching items</span></div>
         </header>
+
+        @if (!ViewContext.ModelState.IsValid)
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>
+        }
 
         <section class="opk-workbench">
             <div class="opk-content-main">
                 <div class="opk-panel">
-                    <div class="opk-toolbar" aria-label="Content filters">
+                    <form class="opk-toolbar opk-content-filters" method="get" aria-label="Content filters">
                         <label>
                             <span>Search</span>
-                            <input type="search" value="public outputs" aria-label="Search content" />
-                        </label>
-                        <label>
-                            <span>Type</span>
-                            <select aria-label="Content type">
-                                <option>All types</option>
-                                <option>Page</option>
-                                <option>Announcement</option>
-                                <option>Report</option>
-                            </select>
+                            <input asp-for="Search" name="q" type="search" maxlength="200" placeholder="Title, slug, or summary" />
                         </label>
                         <label>
                             <span>Status</span>
-                            <select aria-label="Status">
-                                <option>Review</option>
-                                <option>Draft</option>
-                                <option>Approved</option>
-                                <option>Published</option>
+                            <select asp-for="Status">
+                                <option value="">All statuses</option>
+                                @foreach (var status in Enum.GetValues<ContentPublicationStatus>())
+                                {
+                                    <option value="@status">@status</option>
+                                }
                             </select>
                         </label>
-                        <label>
-                            <span>Owner</span>
-                            <select aria-label="Owner">
-                                <option>Any owner</option>
-                                <option>Editorial</option>
-                                <option>Publishing</option>
-                                <option>Operations</option>
-                            </select>
-                        </label>
-                    </div>
+                        <button class="opk-button opk-button-primary" type="submit">Apply filters</button>
+                        <a class="opk-button opk-button-secondary" asp-page="/Content/Index">Clear</a>
+                    </form>
 
                     <div class="opk-table-wrap">
                         <table class="opk-table opk-content-table">
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Owner</th>
-                                    <th>Public Outputs</th>
-                                    <th>Updated</th>
-                                </tr>
-                            </thead>
+                            <thead><tr><th>Title</th><th>Status</th><th>Source</th><th>Author</th><th>Updated</th></tr></thead>
                             <tbody>
-                                <tr class="is-selected">
-                                    <td>
-                                        <strong>Product documentation refresh</strong>
-                                        <span>/docs/product-refresh</span>
-                                    </td>
-                                    <td>Page</td>
-                                    <td><span class="opk-chip is-review">Review</span></td>
-                                    <td>Editorial</td>
-                                    <td>
-                                        <span class="opk-output-set">HTML</span>
-                                        <span class="opk-output-set">JSON</span>
-                                        <span class="opk-output-set">MD</span>
-                                    </td>
-                                    <td>08:42</td>
+                            @foreach (var item in Model.Items)
+                            {
+                                <tr class="@(item.Id == Model.SelectedItem?.Id ? "is-selected" : null)">
+                                    <td><strong><a class="opk-content-title" href="@Model.BuildPageUrl(Model.PageNumber, item.Id)">@item.Title</a></strong><span>/content/@item.Slug</span></td>
+                                    <td><span class="opk-chip @StatusClass(item.Status)">@item.Status</span></td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.Source) ? "Direct authoring" : item.Source)</td>
+                                    <td><code>@OpenPortalKit.AdminHost.Pages.Content.IndexModel.AuthorLabel(item)</code></td>
+                                    <td><time datetime="@item.UpdatedAt.ToString("O")">@item.UpdatedAt.ToString("yyyy-MM-dd HH:mm")</time></td>
                                 </tr>
-                                <tr>
-                                    <td>
-                                        <strong>Research portal release notes</strong>
-                                        <span>/reports/release-notes</span>
-                                    </td>
-                                    <td>Report</td>
-                                    <td><span class="opk-chip is-approved">Approved</span></td>
-                                    <td>Publishing</td>
-                                    <td>
-                                        <span class="opk-output-set">HTML</span>
-                                        <span class="opk-output-set">RSS</span>
-                                    </td>
-                                    <td>Yesterday</td>
-                                </tr>
-                                <tr>
-                                    <td>
-                                        <strong>Service availability announcement</strong>
-                                        <span>/announcements/service-availability</span>
-                                    </td>
-                                    <td>Announcement</td>
-                                    <td><span class="opk-chip is-scheduled">Scheduled</span></td>
-                                    <td>Operations</td>
-                                    <td>
-                                        <span class="opk-output-set">HTML</span>
-                                        <span class="opk-output-set">Sitemap</span>
-                                    </td>
-                                    <td>Mon</td>
-                                </tr>
-                                <tr>
-                                    <td>
-                                        <strong>Structured publishing guide</strong>
-                                        <span>/guides/structured-publishing</span>
-                                    </td>
-                                    <td>Page</td>
-                                    <td><span class="opk-chip is-draft">Draft</span></td>
-                                    <td>Editorial</td>
-                                    <td>
-                                        <span class="opk-output-set">Pending</span>
-                                    </td>
-                                    <td>Jul 4</td>
-                                </tr>
+                            }
+                            @if (Model.Items.Count == 0)
+                            {
+                                <tr><td class="opk-empty-cell" colspan="5">No content matches the current filters.</td></tr>
+                            }
                             </tbody>
                         </table>
                     </div>
+
+                    @if (Model.TotalPages > 1)
+                    {
+                        <nav class="opk-pagination" aria-label="Content pages">
+                            <a class="opk-button opk-button-secondary @(Model.PageNumber == 1 ? "is-disabled" : null)" href="@(Model.PageNumber == 1 ? null : Model.BuildPageUrl(Model.PageNumber - 1))" aria-disabled="@(Model.PageNumber == 1 ? "true" : null)">Previous</a>
+                            <span>Page @Model.PageNumber of @Model.TotalPages</span>
+                            <a class="opk-button opk-button-secondary @(Model.PageNumber == Model.TotalPages ? "is-disabled" : null)" href="@(Model.PageNumber == Model.TotalPages ? null : Model.BuildPageUrl(Model.PageNumber + 1))" aria-disabled="@(Model.PageNumber == Model.TotalPages ? "true" : null)">Next</a>
+                        </nav>
+                    }
                 </div>
             </div>
 
-            <aside class="opk-inspector" aria-label="Selected content inspector">
+            <aside class="opk-inspector" aria-label="Selected content details">
                 <div class="opk-panel">
+                @if (Model.SelectedItem is { } selected)
+                {
                     <div class="opk-inspector-title">
-                        <span class="opk-chip is-review">Review</span>
-                        <h2>Product documentation refresh</h2>
-                        <p>/docs/product-refresh</p>
+                        <span class="opk-chip @StatusClass(selected.Status)">@selected.Status</span>
+                        <h2>@selected.Title</h2>
+                        <p>/content/@selected.Slug</p>
                     </div>
-
                     <div class="opk-inspector-section">
-                        <h3>Readiness</h3>
+                        <h3>Output readiness</h3>
                         <ul class="opk-check-list">
-                            <li><span class="opk-status-dot is-ok"></span>Title and slug complete</li>
-                            <li><span class="opk-status-dot is-ok"></span>Summary ready</li>
-                            <li><span class="opk-status-dot is-ok"></span>Canonical URL set</li>
-                            <li><span class="opk-status-dot is-warn"></span>RSS inclusion pending</li>
-                            <li><span class="opk-status-dot is-ok"></span>JSON snapshot ready</li>
+                            <li><span class="opk-status-dot @(string.IsNullOrWhiteSpace(selected.Title) ? "is-warn" : "is-ok")"></span>Title</li>
+                            <li><span class="opk-status-dot @(string.IsNullOrWhiteSpace(selected.Slug) ? "is-warn" : "is-ok")"></span>Canonical slug</li>
+                            <li><span class="opk-status-dot @(string.IsNullOrWhiteSpace(selected.Summary) ? "is-warn" : "is-ok")"></span>Summary</li>
+                            <li><span class="opk-status-dot @(selected.Status == ContentPublicationStatus.Published ? "is-ok" : "is-warn")"></span>HTML, Markdown, and JSON publication</li>
+                            <li><span class="opk-status-dot @(selected.Status == ContentPublicationStatus.Published ? "is-ok" : "is-warn")"></span>Search and AgentSEO discovery</li>
                         </ul>
                     </div>
-
                     <div class="opk-inspector-section">
-                        <h3>Version Snapshot</h3>
+                        <h3>Traceability</h3>
                         <div class="opk-key-value">
-                            <span>Version</span><strong>v12</strong>
-                            <span>Updated by</span><strong>Editorial</strong>
-                            <span>Updated</span><strong>08:42</strong>
+                            <span>Source</span><strong>@(selected.Source ?? "Direct authoring")</strong>
+                            <span>Created</span><strong>@selected.CreatedAt.ToString("yyyy-MM-dd HH:mm")</strong>
+                            <span>Updated</span><strong>@selected.UpdatedAt.ToString("yyyy-MM-dd HH:mm")</strong>
+                            <span>Published</span><strong>@(selected.PublishedAt?.ToString("yyyy-MM-dd HH:mm") ?? "Not published")</strong>
+                            <span>Tags</span><strong>@(selected.Tags.Count == 0 ? "None" : string.Join(", ", selected.Tags))</strong>
                         </div>
                     </div>
-
                     <div class="opk-inspector-section">
-                        <h3>Audit Trail</h3>
-                        <ol class="opk-timeline">
-                            <li>
-                                <span>08:42</span>
-                                <strong>Submitted for review</strong>
-                                <p>Public output validation completed.</p>
-                            </li>
-                            <li>
-                                <span>08:18</span>
-                                <strong>Draft updated</strong>
-                                <p>Summary and source fields revised.</p>
-                            </li>
-                        </ol>
+                        <h3>Version history</h3>
+                        @if (Model.Versions.Count == 0)
+                        {
+                            <p class="opk-muted">No persisted revisions are available.</p>
+                        }
+                        else
+                        {
+                            <div class="opk-version-list"><ol>
+                            @foreach (var version in Model.Versions.Take(5))
+                            {
+                                <li>
+                                    <strong>Revision @version.Revision</strong>
+                                    <span>@version.Snapshot.Status · @version.CreatedAt.ToString("yyyy-MM-dd HH:mm")</span>
+                                    <small>Actor <code>@version.CreatedBy.ToString("N")[..8]</code></small>
+                                </li>
+                            }
+                            </ol></div>
+                        }
                     </div>
-
-                    <div class="opk-inspector-actions">
-                        <button class="opk-button opk-button-secondary" type="button">Request Changes</button>
-                        <button class="opk-button opk-button-primary" type="button">Approve</button>
-                    </div>
+                }
+                else
+                {
+                    <div class="opk-empty-state"><strong>No content selected</strong><span>Adjust the filters to view matching content.</span></div>
+                }
                 </div>
             </aside>
         </section>

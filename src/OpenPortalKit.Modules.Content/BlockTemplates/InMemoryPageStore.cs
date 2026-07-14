@@ -32,6 +32,26 @@ public sealed class InMemoryPageStore : IPageStore
         return Task.FromResult(page);
     }
 
+    public Task<bool> TryUpdateAsync(
+        PortalPage page,
+        int expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedRevision);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            var index = _pages.FindIndex(candidate => candidate.Id == page.Id);
+            if (index < 0 || _pages[index].Revision != expectedRevision) return Task.FromResult(false);
+            _pages[index] = page;
+            if (_versions.All(version => version.PageId != page.Id || version.Revision != page.Revision))
+                _versions.Add(new PortalPageVersion(page.Id, page.Revision, page, page.UpdatedBy, page.UpdatedAt));
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<PortalPage?> FindBySlugAsync(Guid siteId, string slug, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(slug);
@@ -41,6 +61,15 @@ public sealed class InMemoryPageStore : IPageStore
         {
             return Task.FromResult(_pages.FirstOrDefault(page => page.SiteId == siteId &&
                 string.Equals(page.Slug, slug, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    public Task<PortalPage?> FindByIdAsync(Guid pageId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult(_pages.FirstOrDefault(page => page.Id == pageId));
         }
     }
 

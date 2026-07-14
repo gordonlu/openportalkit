@@ -17,7 +17,7 @@ public sealed class PublicContentQueryService
         ArgumentNullException.ThrowIfNull(query);
 
         var now = asOf ?? DateTimeOffset.UtcNow;
-        var items = await _store.ListAsync(query, cancellationToken);
+        var items = await _store.ListPublishedAsync(query, now, cancellationToken);
 
         return items
             .Where(item => IsPubliclyVisible(item, now))
@@ -33,7 +33,7 @@ public sealed class PublicContentQueryService
         ArgumentNullException.ThrowIfNull(query);
 
         var now = asOf ?? DateTimeOffset.UtcNow;
-        var items = await _store.ListAsync(query, cancellationToken);
+        var items = await _store.ListPublishedAsync(query, now, cancellationToken);
         return items.Where(item => IsPubliclyVisible(item, now)).Select(ToDetail).ToArray();
     }
 

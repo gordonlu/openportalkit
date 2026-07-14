@@ -3544,6 +3544,60 @@ The project generator must not become a low-code platform, arbitrary merge engin
 \---
 
 
+\# R14 — Admin Content Studio
+
+
+\*\*Status: complete.\*\* R14 turns the existing server-first AdminHost into a coherent daily publishing
+workspace. The ImageGen direction is recorded in `docs/r14-admin-content-studio.md`; implementation remains
+accessible Razor Pages backed by existing audited module services.
+
+Batches 1 and 2 are complete. The shared shell and content inventory now include server-side filtering, pagination,
+selection, development fixtures, PostgreSQL persistence, immutable full-snapshot revisions, traceability, and public
+visibility filtering before pagination. Permission checks will be attached to the real save, review, and publication
+commands introduced in Batches 3 and 4.
+
+Batches 1 through 3 are complete. Portal Page editing renders controls and typed list rows from the predefined block
+schema, retains an expert JSON fallback, resolves stable audit actors from the administrator identity, separates edit
+and publish authorization policies, rejects stale revisions atomically in memory and PostgreSQL, preserves submitted
+conflict state for comparison, and validates drafts before encoded server preview.
+
+Batch 4 closes R14 with durable PostgreSQL workflow and approval stores, atomic stale-transition rejection, review
+comments, permission-aware editor actions, UTC scheduling, audited publication through the existing Portal Page
+service and outbox, and a bounded JobHost due-schedule worker with retry-safe target handling. The complete browser
+flow is verified at desktop and mobile widths; sitemap, RSS, route cache, and llms output revalidation remain attached
+to the existing `portal-page.published` event.
+
+
+\## Goal
+
+
+Deliver a product-grade browser workflow for content inventory, structured editing, review, preview, publication,
+version history, and public-output readiness without creating a low-code platform or bypassing module boundaries.
+
+
+\## Planned Batches
+
+
+```txt
+
+shared admin shell and real navigation
+
+server-backed content inventory and selection
+
+schema-driven block editing and concurrency protection
+
+review, scheduling, publication, audit, and AgentSEO readiness
+
+```
+
+
+Every public-output-changing action must use existing workflow, audit, outbox, and revalidation contracts. R14 does
+not add industry-specific entities to core, a generic BPM designer, or a second frontend application.
+
+
+\---
+
+
 \# 7. Testing Strategy
 
 

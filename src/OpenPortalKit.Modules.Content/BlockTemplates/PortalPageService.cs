@@ -7,6 +7,9 @@ namespace OpenPortalKit.Modules.Content.BlockTemplates;
 
 public sealed class PortalPageService
 {
+    public const string RevisionConflictMessage =
+        "This page changed after it was opened. Reload the latest revision before saving.";
+
     private readonly IPageTemplateStore _templateStore;
     private readonly IPageStore _pageStore;
     private readonly AuditRecorder _auditRecorder;
@@ -50,6 +53,11 @@ public sealed class PortalPageService
             return new PortalPageOperationResult(false, null, new[] { "Page is not available for editing." });
         }
 
+        if (page.Revision != request.ExpectedRevision)
+        {
+            return RevisionConflict();
+        }
+
         var slug = SlugGenerator.Generate(request.Slug);
         if (page.Status == PortalPageStatus.Published && !string.Equals(page.Slug, slug, StringComparison.Ordinal))
         {
@@ -63,23 +71,6 @@ public sealed class PortalPageService
         }
 
         var blocks = request.Blocks.OrderBy(block => block.SortOrder).ToArray();
-        var validation = PageTemplateValidator.Validate(new PageTemplate(
-            page.TemplateId,
-            "page-validation",
-            request.Title,
-            request.Summary,
-            PageTemplateStatus.Draft,
-            Math.Max(1, page.TemplateVersion),
-            blocks,
-            page.CreatedBy,
-            request.ActorId,
-            page.CreatedAt,
-            _clock()), _blockCatalog);
-        if (!validation.IsValid)
-        {
-            return new PortalPageOperationResult(false, null, validation.Errors);
-        }
-
         var now = _clock();
         var updated = page with
         {
@@ -91,7 +82,13 @@ public sealed class PortalPageService
             UpdatedAt = now,
             Revision = page.Revision + 1
         };
-        await _pageStore.UpsertAsync(updated, cancellationToken);
+        var validationErrors = ValidateDraft(updated);
+        if (validationErrors.Count > 0)
+            return new PortalPageOperationResult(false, null, validationErrors);
+        if (!await _pageStore.TryUpdateAsync(updated, request.ExpectedRevision, cancellationToken))
+        {
+            return RevisionConflict();
+        }
         await _auditRecorder.RecordAsync(new AuditRecordRequest(
             request.ActorId,
             "portal-page.updated",
@@ -277,6 +274,35 @@ public sealed class PortalPageService
         if (string.IsNullOrWhiteSpace(request.Slug)) errors.Add("Page slug is required.");
         if (string.IsNullOrWhiteSpace(request.Summary)) errors.Add("Page summary is required.");
         if (request.Blocks.Count == 0) errors.Add("A page must contain at least one block.");
+        if (request.ExpectedRevision <= 0) errors.Add("Expected page revision must be positive.");
         return errors;
+    }
+
+    private static PortalPageOperationResult RevisionConflict() => new(
+        false,
+        null,
+        new[] { RevisionConflictMessage });
+
+    public IReadOnlyList<string> ValidateDraft(PortalPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(page.Title)) errors.Add("Page title is required.");
+        if (string.IsNullOrWhiteSpace(page.Slug)) errors.Add("Page slug is required.");
+        if (string.IsNullOrWhiteSpace(page.Summary)) errors.Add("Page summary is required.");
+        var blockValidation = PageTemplateValidator.Validate(new PageTemplate(
+            page.TemplateId,
+            "page-validation",
+            page.Title,
+            page.Summary,
+            PageTemplateStatus.Draft,
+            Math.Max(1, page.TemplateVersion),
+            page.Blocks,
+            page.CreatedBy,
+            page.UpdatedBy,
+            page.CreatedAt,
+            page.UpdatedAt), _blockCatalog);
+        errors.AddRange(blockValidation.Errors);
+        return errors.Distinct(StringComparer.Ordinal).ToArray();
     }
 }

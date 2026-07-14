@@ -1,37 +1,227 @@
 @page
 @model OpenPortalKit.AdminHost.Pages.Templates.PageEditModel
+@using OpenPortalKit.Modules.Content.BlockTemplates
+@using OpenPortalKit.Modules.Workflow.Publishing
 @{
     ViewData["Title"] = "Edit Portal Page";
 }
 
 <section class="opk-admin-shell">
-    <aside class="opk-sidebar" aria-label="Admin navigation">
-        <a class="opk-brand" asp-page="/Index"><span class="opk-brand-mark">OP</span><span><strong>OpenPortalKit</strong><small>Admin</small></span></a>
-        <nav class="opk-nav"><a class="opk-nav-link" asp-page="/Index"><span class="opk-nav-icon"></span>Dashboard</a><a class="opk-nav-link" asp-page="/Content/Index"><span class="opk-nav-icon"></span>Content</a><a class="opk-nav-link is-active" asp-page="/Templates/Index"><span class="opk-nav-icon"></span>Templates</a><a class="opk-nav-link" asp-page="/AgentAccess/Index"><span class="opk-nav-icon"></span>Agent Access</a></nav>
-        <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>Revision tracking active</span></div>
-    </aside>
+    <partial name="_AdminSidebar" />
     <div class="opk-workspace">
-        <header class="opk-topbar"><div><a class="opk-back-link" asp-page="/Templates/Index">Pages</a><h1>@Model.Editor.Title</h1><p>@Model.Editor.Status · revision @Model.Editor.Revision</p></div></header>
-        @if (!ViewContext.ModelState.IsValid){<div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>}
+        <header class="opk-topbar">
+            <div>
+                <a class="opk-back-link" asp-page="/Templates/Index">Pages</a>
+                <h1>@Model.Editor.Title</h1>
+                <p>@(Model.Workflow?.State.ToString() ?? Model.Editor.Status.ToString()) · revision @Model.Editor.Revision</p>
+            </div>
+        </header>
+
+        @if (!ViewContext.ModelState.IsValid)
+        {
+            <div class="opk-alert-strip"><div class="opk-alert-link is-critical">@string.Join(" ", ViewContext.ModelState.Values.SelectMany(value => value.Errors).Select(error => error.ErrorMessage))</div></div>
+        }
+        @if (Model.ConflictLatestPage is { } latest)
+        {
+            <section class="opk-conflict-panel" role="alert">
+                <div><strong>Newer revision available</strong><span>Revision @latest.Revision was saved @latest.UpdatedAt.ToString("yyyy-MM-dd HH:mm") by @latest.UpdatedBy.ToString("N")[..8].</span></div>
+                <a class="opk-button opk-button-secondary" asp-page="/Templates/PageEdit" asp-route-slug="@latest.Slug" target="_blank" rel="noopener">Open latest</a>
+            </section>
+        }
+
         <form method="post" class="opk-template-editor">
-            <input asp-for="Editor.CurrentSlug" type="hidden" /><input asp-for="Editor.Status" type="hidden" /><input asp-for="Editor.Revision" type="hidden" />
+            <input asp-for="Editor.CurrentSlug" type="hidden" />
+            <input asp-for="Editor.Status" type="hidden" />
+            <input asp-for="Editor.Revision" type="hidden" />
+
             <section class="opk-template-editor-main">
                 <div class="opk-panel opk-template-metadata">
-                    <div class="opk-panel-header"><div><h2>Page Details</h2><p>Public edits are audited and invalidate derived outputs.</p></div><div class="opk-editor-actions"><button class="opk-button opk-button-secondary" asp-page-handler="Preview" type="submit">Preview</button><button class="opk-button opk-button-primary" asp-page-handler="Save" type="submit">Save revision</button>@if(Model.Editor.Status == OpenPortalKit.Modules.Content.BlockTemplates.PortalPageStatus.Draft){<button class="opk-button opk-button-primary" asp-page-handler="Publish" type="submit">Publish</button>}</div></div>
-                    <div class="opk-editor-fields"><label>Title<input asp-for="Editor.Title" /></label><label>Slug<input asp-for="Editor.Slug" readonly="@(Model.Editor.Status == OpenPortalKit.Modules.Content.BlockTemplates.PortalPageStatus.Published)" /></label><label class="is-wide">Summary<textarea asp-for="Editor.Summary" rows="2"></textarea></label></div>
+                    <div class="opk-panel-header">
+                        <div><h2>Page Details</h2><p>@(Model.CanEdit ? "Edit the current draft and submit it for review." : "Editing is locked while this revision is under publication control.")</p></div>
+                        <div class="opk-editor-actions">
+                            <button class="opk-button opk-button-secondary" asp-page-handler="Preview" type="submit">Preview</button>
+                            @if (Model.CanEdit)
+                            {
+                                <button class="opk-button opk-button-primary" asp-page-handler="Save" type="submit">Save revision</button>
+                                <button class="opk-button opk-button-primary" asp-page-handler="SubmitForReview" type="submit">Submit for review</button>
+                            }
+                        </div>
+                    </div>
+                    <div class="opk-editor-fields">
+                        <label>Title<input asp-for="Editor.Title" /></label>
+                        <label>Slug<input asp-for="Editor.Slug" readonly="@(Model.Editor.Status == PortalPageStatus.Published)" /></label>
+                        <label class="is-wide">Summary<textarea asp-for="Editor.Summary" rows="2"></textarea></label>
+                    </div>
                 </div>
+
                 <div class="opk-editor-block-list">
-                @for (var index = 0; index < Model.Editor.Blocks.Count; index++)
+                @for (var blockIndex = 0; blockIndex < Model.Editor.Blocks.Count; blockIndex++)
                 {
-                    var block = Model.Editor.Blocks[index]; var definition = Model.Definitions.FirstOrDefault(item => item.Code == block.DefinitionCode);
-                    <article class="opk-panel opk-block-editor"><input asp-for="Editor.Blocks[index].Id" type="hidden" /><input asp-for="Editor.Blocks[index].DefinitionCode" type="hidden" /><input asp-for="Editor.Blocks[index].SchemaVersion" type="hidden" /><header><div><span class="opk-block-order">@(index + 1)</span><div><h3>@(definition?.DisplayName ?? block.DefinitionCode)</h3><p>@block.SchemaVersion · @(definition?.Description)</p></div></div><label class="opk-remove-block"><input asp-for="Editor.Blocks[index].Remove" />Remove</label></header><div class="opk-block-editor-fields"><label>Order<input asp-for="Editor.Blocks[index].SortOrder" type="number" min="0" /></label><label class="is-wide">Configuration JSON<textarea asp-for="Editor.Blocks[index].ConfigurationJson" rows="5" spellcheck="false"></textarea></label></div>@if(definition is not null){<div class="opk-schema-fields">@foreach(var setting in definition.Settings){<span><strong>@setting.Label</strong> · @setting.Type @(setting.IsRequired ? "· required" : "")</span>}</div>}</article>
+                    var block = Model.Editor.Blocks[blockIndex];
+                    var definition = Model.Definitions.FirstOrDefault(item => item.Code == block.DefinitionCode);
+                    <article class="opk-panel opk-block-editor">
+                        <input asp-for="Editor.Blocks[blockIndex].Id" type="hidden" />
+                        <input asp-for="Editor.Blocks[blockIndex].DefinitionCode" type="hidden" />
+                        <input asp-for="Editor.Blocks[blockIndex].SchemaVersion" type="hidden" />
+                        <header>
+                            <div>
+                                <span class="opk-block-order">@(blockIndex + 1)</span>
+                                <div><h3>@(definition?.DisplayName ?? block.DefinitionCode)</h3><p>@block.SchemaVersion · @(definition?.Description)</p></div>
+                            </div>
+                            <label class="opk-remove-block"><input asp-for="Editor.Blocks[blockIndex].Remove" />Remove</label>
+                        </header>
+
+                        <div class="opk-block-editor-fields">
+                            <label>Order<input asp-for="Editor.Blocks[blockIndex].SortOrder" type="number" min="0" /></label>
+                            @if (definition is not null)
+                            {
+                                @for (var settingIndex = 0; settingIndex < definition.Settings.Count; settingIndex++)
+                                {
+                                    var setting = definition.Settings[settingIndex];
+                                    <input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Key" type="hidden" />
+                                    <input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Type" type="hidden" />
+
+                                    @if (setting.Type == BlockSettingType.Boolean)
+                                    {
+                                        <label class="opk-setting-toggle"><input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].BooleanValue" type="checkbox" />@setting.Label</label>
+                                    }
+                                    else if (setting.Type == BlockSettingType.StructuredList &&
+                                             block.DefinitionCode is "chart" or "link-list" or "download-list" or "faq")
+                                    {
+                                        var list = block.Settings[settingIndex];
+                                        <input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Value" type="hidden" />
+                                        <section class="opk-structured-list is-wide">
+                                            <div class="opk-structured-list-header">
+                                                <div><strong>@setting.Label</strong>@if (setting.IsRequired){<span aria-hidden="true"> *</span>}@if (!string.IsNullOrWhiteSpace(setting.Description)){<small>@setting.Description</small>}</div>
+                                                <button class="opk-icon-button" type="submit" asp-page-handler="AddStructuredItem" asp-route-StructuredBlockIndex="@blockIndex" asp-route-StructuredSettingIndex="@settingIndex" title="Add @setting.Label item" aria-label="Add @setting.Label item">+</button>
+                                            </div>
+                                            <div class="opk-structured-items">
+                                            @for (var itemIndex = 0; itemIndex < list.Items.Count; itemIndex++)
+                                            {
+                                                <fieldset class="opk-structured-item">
+                                                    <legend>Item @(itemIndex + 1)</legend>
+                                                    @if (block.DefinitionCode == "faq")
+                                                    {
+                                                        <label>Question<input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Question" /></label>
+                                                        <label class="is-wide">Answer<textarea asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Answer" rows="3"></textarea></label>
+                                                    }
+                                                    else
+                                                    {
+                                                        <label>Label<input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Label" /></label>
+                                                        @if (block.DefinitionCode == "chart")
+                                                        {
+                                                            <label>Value<input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Value" type="number" min="0" step="any" /></label>
+                                                        }
+                                                        else
+                                                        {
+                                                            <label>URL<input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Url" type="text" /></label>
+                                                        }
+                                                        @if (block.DefinitionCode == "download-list")
+                                                        {
+                                                            <label class="is-wide">Description<textarea asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Description" rows="2"></textarea></label>
+                                                        }
+                                                    }
+                                                    <label class="opk-remove-item"><input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Items[itemIndex].Remove" />Remove item</label>
+                                                </fieldset>
+                                            }
+                                            </div>
+                                        </section>
+                                    }
+                                    else if (setting.Type is BlockSettingType.RichText or BlockSettingType.StructuredList)
+                                    {
+                                        <label class="is-wide">@setting.Label@if(setting.IsRequired){<span aria-hidden="true"> *</span>}<textarea asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Value" rows="@(setting.Type == BlockSettingType.StructuredList ? 7 : 5)" spellcheck="@(setting.Type == BlockSettingType.StructuredList ? "false" : "true")"></textarea></label>
+                                    }
+                                    else
+                                    {
+                                        <label>@setting.Label@if(setting.IsRequired){<span aria-hidden="true"> *</span>}<input asp-for="Editor.Blocks[blockIndex].Settings[settingIndex].Value" type="@(setting.Type == BlockSettingType.Number ? "number" : setting.Type == BlockSettingType.Url ? "url" : "text")" /></label>
+                                    }
+                                }
+                            }
+
+                            <details class="opk-expert-json is-wide">
+                                <summary>Expert JSON</summary>
+                                <label class="opk-setting-toggle"><input asp-for="Editor.Blocks[blockIndex].UseExpertJson" />Use JSON override</label>
+                                <textarea asp-for="Editor.Blocks[blockIndex].ConfigurationJson" rows="7" spellcheck="false"></textarea>
+                            </details>
+                        </div>
+                    </article>
                 }
                 </div>
-                <div class="opk-panel opk-add-block"><label>Add predefined block<select asp-for="NewBlockCode"><option value="">Select block</option>@foreach(var definition in Model.Definitions){<option value="@definition.Code">@definition.DisplayName</option>}</select></label><button class="opk-button opk-button-secondary" asp-page-handler="AddBlock" type="submit">Add block</button></div>
+
+                @if (Model.CanEdit)
+                {
+                    <div class="opk-panel opk-add-block">
+                        <label>Add predefined block<select asp-for="NewBlockCode"><option value="">Select block</option>@foreach(var definition in Model.Definitions){<option value="@definition.Code">@definition.DisplayName</option>}</select></label>
+                        <button class="opk-button opk-button-secondary" asp-page-handler="AddBlock" type="submit">Add block</button>
+                    </div>
+                }
             </section>
+
             <aside class="opk-template-editor-side">
-                <section class="opk-panel opk-preview-panel"><div class="opk-panel-header"><div><h2>Server Preview</h2><p>Unsaved, encoded public rendering.</p></div></div>@if(Model.PreviewHtml is not null){<div class="opk-preview-surface">@Html.Raw(Model.PreviewHtml)</div>}else if(Model.PreviewError is not null){<p class="opk-preview-error">@Model.PreviewError</p>}else{<p class="opk-preview-empty">Preview the current revision here.</p>}</section>
-                <section class="opk-panel opk-version-list"><div class="opk-panel-header"><div><h2>Revision History</h2><p>Immutable page snapshots.</p></div></div><ol>@foreach(var version in Model.Versions){<li><strong>r@(version.Revision)</strong><span>@version.CreatedAt.ToString("yyyy-MM-dd HH:mm")</span><small>@version.Snapshot.Blocks.Count blocks · @version.Snapshot.Status</small></li>}</ol></section>
+                @if (Model.Workflow is { } workflow)
+                {
+                    <section class="opk-panel opk-workflow-panel">
+                        <div class="opk-panel-header">
+                            <div><h2>Publication</h2><p>Controlled review and public-output readiness.</p></div>
+                            <span class="opk-workflow-state is-@workflow.State.ToString().ToLowerInvariant()">@workflow.State</span>
+                        </div>
+
+                        @if (workflow.ScheduledAt is { } scheduledAt)
+                        {
+                            <p class="opk-workflow-schedule"><strong>Scheduled</strong><span>@scheduledAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'")</span></p>
+                        }
+
+                        @if (Model.CanPublish && workflow.State == WorkflowState.Review)
+                        {
+                            <label>Review comment<textarea asp-for="Review.Comment" rows="3" maxlength="2000" placeholder="Decision context"></textarea></label>
+                            <div class="opk-workflow-actions">
+                                <button class="opk-button opk-button-primary" asp-page-handler="Approve" type="submit">Approve</button>
+                                <button class="opk-button opk-button-secondary" asp-page-handler="RequestChanges" type="submit">Request changes</button>
+                                <button class="opk-button opk-button-danger" asp-page-handler="Reject" type="submit">Reject</button>
+                            </div>
+                        }
+                        else if (Model.CanPublish && workflow.State == WorkflowState.Approved)
+                        {
+                            <label>Publication time (UTC)<input asp-for="Review.ScheduledAtUtc" type="datetime-local" /></label>
+                            <div class="opk-workflow-actions">
+                                <button class="opk-button opk-button-primary" asp-page-handler="Publish" type="submit">Publish now</button>
+                                <button class="opk-button opk-button-secondary" asp-page-handler="SchedulePublish" type="submit">Schedule</button>
+                            </div>
+                        }
+                        else if (workflow.State is WorkflowState.Draft or WorkflowState.Rejected)
+                        {
+                            <p class="opk-preview-empty">Save the revision, then submit it for review.</p>
+                        }
+                        else if (workflow.State == WorkflowState.Published)
+                        {
+                            <p class="opk-preview-empty">This revision is public. Its publication and derived-output refresh are audited.</p>
+                        }
+
+                        @if (Model.ApprovalHistory.Count > 0)
+                        {
+                            <ol class="opk-approval-history">
+                                @foreach (var record in Model.ApprovalHistory)
+                                {
+                                    <li>
+                                        <div><strong>@record.Action</strong><time datetime="@record.OccurredAt.ToString("O")">@record.OccurredAt.ToString("yyyy-MM-dd HH:mm")</time></div>
+                                        @if (!string.IsNullOrWhiteSpace(record.Comment)){<p>@record.Comment</p>}
+                                        <small>@record.ActorId.ToString("N")[..8] · @record.FromState → @record.ToState</small>
+                                    </li>
+                                }
+                            </ol>
+                        }
+                    </section>
+                }
+                <section class="opk-panel opk-preview-panel">
+                    <div class="opk-panel-header"><div><h2>Server Preview</h2><p>Unsaved, encoded public rendering.</p></div></div>
+                    @if (Model.PreviewHtml is not null){<div class="opk-preview-surface">@Html.Raw(Model.PreviewHtml)</div>}
+                    else if(Model.PreviewError is not null){<p class="opk-preview-error">@Model.PreviewError</p>}
+                    else{<p class="opk-preview-empty">Preview the current revision here.</p>}
+                </section>
+                <section class="opk-panel opk-version-list">
+                    <div class="opk-panel-header"><div><h2>Revision History</h2><p>Immutable page snapshots.</p></div></div>
+                    <ol>@foreach(var version in Model.Versions){<li><strong>r@(version.Revision)</strong><span>@version.CreatedAt.ToString("yyyy-MM-dd HH:mm")</span><small>@version.Snapshot.Blocks.Count blocks · @version.Snapshot.Status</small></li>}</ol>
+                </section>
             </aside>
         </form>
     </div>

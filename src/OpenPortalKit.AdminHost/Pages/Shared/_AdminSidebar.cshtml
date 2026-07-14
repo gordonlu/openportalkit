@@ -1,0 +1,32 @@
+@{
+    var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? string.Empty;
+    bool IsCurrent(string page) => string.Equals(currentPage, page, StringComparison.OrdinalIgnoreCase) ||
+        (page == "/Templates/Index" && currentPage.StartsWith("/Templates/", StringComparison.OrdinalIgnoreCase));
+    string LinkClass(string page) => IsCurrent(page)
+        ? "opk-nav-link is-active"
+        : "opk-nav-link";
+    string? Current(string page) => IsCurrent(page)
+        ? "page"
+        : null;
+}
+
+<aside class="opk-sidebar" aria-label="Admin navigation">
+    <a class="opk-brand" asp-page="/Index" aria-label="OpenPortalKit Admin home">
+        <span class="opk-brand-mark">OPK</span>
+        <span><strong>OpenPortalKit</strong><small>Content Studio</small></span>
+    </a>
+
+    <nav class="opk-nav">
+        <span class="opk-nav-group">Operations</span>
+        <a class="@LinkClass("/Index")" asp-page="/Index" aria-current="@Current("/Index")"><span class="opk-nav-icon"></span>Dashboard</a>
+        <a class="@LinkClass("/Content/Index")" asp-page="/Content/Index" aria-current="@Current("/Content/Index")"><span class="opk-nav-icon"></span>Content</a>
+        <a class="@LinkClass("/Templates/Index")" asp-page="/Templates/Index" aria-current="@Current("/Templates/Index")"><span class="opk-nav-icon"></span>Pages &amp; Templates</a>
+        <a class="@LinkClass("/AgentAccess/Index")" asp-page="/AgentAccess/Index" aria-current="@Current("/AgentAccess/Index")"><span class="opk-nav-icon"></span>Agent Access</a>
+
+        <span class="opk-nav-group">System</span>
+        <a class="@LinkClass("/IndustryPacks/Index")" asp-page="/IndustryPacks/Index" aria-current="@Current("/IndustryPacks/Index")"><span class="opk-nav-icon"></span>Industry Packs</a>
+        <a class="@LinkClass("/Migration/Index")" asp-page="/Migration/Index" aria-current="@Current("/Migration/Index")"><span class="opk-nav-icon"></span>Migration</a>
+    </nav>
+
+    <div class="opk-sidebar-status"><span class="opk-status-dot is-ok"></span><span>Boundary checks active</span></div>
+</aside>
