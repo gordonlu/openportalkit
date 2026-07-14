@@ -276,13 +276,15 @@ file sealed class TestHost : IAsyncDisposable
             Timeout = TimeSpan.FromSeconds(2)
         };
         var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+        HttpStatusCode? lastStatusCode = null;
         while (DateTimeOffset.UtcNow < deadline)
         {
             if (_process.HasExited)
                 throw new InvalidOperationException($"Host exited with code {_process.ExitCode}.\n{Output()}");
             try
             {
-                using var response = await client.GetAsync("health/ready");
+                using var response = await client.GetAsync("health/live");
+                lastStatusCode = response.StatusCode;
                 if (response.IsSuccessStatusCode) return;
             }
             catch (HttpRequestException)
@@ -293,7 +295,8 @@ file sealed class TestHost : IAsyncDisposable
             }
             await Task.Delay(100);
         }
-        throw new TimeoutException("Host did not become ready.\n" + Output());
+        var status = lastStatusCode is null ? "no HTTP response" : $"last status {(int)lastStatusCode} {lastStatusCode}";
+        throw new TimeoutException($"Host did not become live ({status}).\n" + Output());
     }
 
     private void Capture(string? line)
