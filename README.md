@@ -3,7 +3,7 @@
 ![OpenPortalKit public portal, publishing workflow, structured data, and API outputs](docs/assets/openportalkit-header.webp)
 
 [![CI](https://github.com/gordonlu/openportalkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gordonlu/openportalkit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/gordonlu/openportalkit)](https://github.com/gordonlu/openportalkit/commits/main)
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
