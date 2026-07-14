@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ExamplePortal } from "@/components/example-portal";
-import { exampleSiteMap, exampleSites } from "@/lib/example-sites";
+import { exampleSites, getExampleSite } from "@/lib/example-sites";
 
 export const dynamicParams = false;
 
@@ -11,7 +11,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps<"/examples/[site]">): Promise<Metadata> {
   const { site: slug } = await params;
-  const site = exampleSiteMap.get(slug);
+  const site = getExampleSite(slug);
   if (!site) return {};
   return {
     title: `${site.name} | OpenPortalKit Example`,
@@ -21,7 +21,7 @@ export async function generateMetadata({ params }: PageProps<"/examples/[site]">
 
 export default async function ExamplePage({ params }: PageProps<"/examples/[site]">) {
   const { site: slug } = await params;
-  const site = exampleSiteMap.get(slug);
+  const site = getExampleSite(slug);
   if (!site) notFound();
   return <ExamplePortal site={site} />;
 }

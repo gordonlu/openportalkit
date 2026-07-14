@@ -1,3 +1,5 @@
+import projectProfile from "./project-profile.json";
+
 export type ExamplePublication = {
   title: string;
   category: string;
@@ -136,3 +138,13 @@ export const exampleSites: ExampleSite[] = [
 ];
 
 export const exampleSiteMap = new Map(exampleSites.map((site) => [site.slug, site]));
+
+export const defaultExampleSite = exampleSiteMap.has(projectProfile.defaultSite)
+  ? projectProfile.defaultSite
+  : "corporate";
+
+export function getExampleSite(slug: string) {
+  const site = exampleSiteMap.get(slug);
+  if (!site || slug !== defaultExampleSite || projectProfile.projectName === "OpenPortalKit Examples") return site;
+  return { ...site, name: projectProfile.projectName };
+}

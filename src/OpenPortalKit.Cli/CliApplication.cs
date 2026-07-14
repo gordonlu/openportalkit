@@ -6,7 +6,7 @@ namespace OpenPortalKit.Cli;
 
 public sealed class CliApplication(TextWriter output, TextWriter error)
 {
-    private const string Version = "0.1.0-r12";
+    private const string Version = "0.4.0-r13";
     private readonly TextWriter _output = output ?? throw new ArgumentNullException(nameof(output));
     private readonly TextWriter _error = error ?? throw new ArgumentNullException(nameof(error));
 
@@ -32,16 +32,100 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
             {
                 "check-boundaries" => RunBoundaryCheck(args[1..]),
                 "check-agent-readiness" => await RunAgentReadinessCheckAsync(args[1..], cancellationToken),
+                "new" => await RunNewAsync(args[1..], cancellationToken),
+                "module" => await RunModuleAsync(args[1..], cancellationToken),
+                "template" => await RunTemplateAsync(args[1..], cancellationToken),
+                "upgrade" => await RunUpgradeAsync(args[1..], cancellationToken),
                 "industry-pack" => await RunIndustryPackAsync(args[1..], cancellationToken),
                 "import" => await RunImportAsync(args[1..], cancellationToken),
                 _ => UsageError($"Unknown command '{args[0]}'.")
             };
         }
-        catch (Exception exception) when (exception is ArgumentException or DirectoryNotFoundException or FileNotFoundException or FormatException)
+        catch (Exception exception) when (exception is ArgumentException or DirectoryNotFoundException or
+            FileNotFoundException or FormatException or IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception)
         {
             await _error.WriteLineAsync("error: " + exception.Message);
             return 2;
         }
+    }
+
+    private async Task<int> RunUpgradeAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "inspect")
+            return UsageError("upgrade requires the 'inspect' subcommand.");
+        var options = ParseUpgradeInspectOptions(args[1..]);
+        var report = await new UpgradeInspector().InspectAsync(
+            Path.GetFullPath(options.Root),
+            RepositoryLocator.Find(options.Source),
+            cancellationToken);
+        WriteReport(report, options.Format);
+        return report.IsSuccessful ? 0 : 1;
+    }
+
+    private async Task<int> RunModuleAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "add")
+            return UsageError("module requires the 'add' subcommand.");
+
+        var options = ParseModuleAddOptions(args[1..]);
+        var root = RepositoryLocator.Find(options.Root);
+        var result = await new ModuleScaffolder().CreateAsync(
+            new ModuleScaffoldOptions(
+                options.Name,
+                options.Area,
+                options.Description,
+                options.OwnsBusinessState,
+                options.PublicOutputs,
+                root),
+            cancellationToken);
+        await _output.WriteLineAsync($"Created module '{result.Name}' at {result.SourcePath}");
+        await _output.WriteLineAsync($"Created contract tests at {result.TestPath}");
+        await _output.WriteLineAsync("The module depends on Kernel only and is registered in OpenPortalKit.sln.");
+        return 0;
+    }
+
+    private async Task<int> RunNewAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var options = ParseNewOptions(args);
+        TemplateArchiveExtraction? extraction = null;
+        var sourceRoot = options.SourceRoot is not null && File.Exists(options.SourceRoot)
+            ? (extraction = await new TemplateArchive().ExtractAsync(options.SourceRoot, cancellationToken)).Path
+            : RepositoryLocator.Find(options.SourceRoot);
+        await using var extractionLease = extraction;
+        var result = await new WorkspaceScaffolder().CreateAsync(
+            new WorkspaceScaffoldOptions(options.Name, options.Profile, options.OutputPath, sourceRoot),
+            cancellationToken);
+        await _output.WriteLineAsync($"Created '{result.Name}' from the {result.Profile} profile at {result.Path}");
+        await _output.WriteLineAsync($"Template {WorkspaceScaffolder.TemplateVersion}, {result.FileCount} files, checksum {result.SourceChecksum}");
+        await _output.WriteLineAsync($"Next: cd \"{result.Path}\" and run 'dotnet build OpenPortalKit.sln -m:1'.");
+        return 0;
+    }
+
+    private async Task<int> RunTemplateAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "pack")
+            return UsageError("template requires the 'pack' subcommand.");
+        string? source = null;
+        string? output = null;
+        for (var index = 1; index < args.Length; index++)
+        {
+            var option = args[index];
+            var value = index + 1 < args.Length ? args[index + 1] : null;
+            switch (option)
+            {
+                case "--source": source = RequireValue(option, value); index++; break;
+                case "--output": output = RequireValue(option, value); index++; break;
+                default: throw new ArgumentException($"Unknown or unsupported option '{option}'.");
+            }
+        }
+        if (string.IsNullOrWhiteSpace(output))
+            throw new ArgumentException("template pack requires --output <archive.opkt>.");
+        var result = await new TemplateArchive().PackAsync(RepositoryLocator.Find(source), output, cancellationToken);
+        await _output.WriteLineAsync($"Created source template archive at {result.Path}");
+        await _output.WriteLineAsync($"Source {result.FileCount} files, checksum {result.SourceChecksum}");
+        await _output.WriteLineAsync($"Archive checksum {result.ArchiveChecksum}");
+        return 0;
     }
 
     private int RunBoundaryCheck(string[] args)
@@ -258,6 +342,32 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
         return new IndustryPackCliOptions(path, coreVersion, format);
     }
 
+    private static NewWorkspaceCliOptions ParseNewOptions(string[] args)
+    {
+        string? name = null;
+        string? output = null;
+        string? source = null;
+        var profile = "corporate";
+
+        for (var index = 0; index < args.Length; index++)
+        {
+            var option = args[index];
+            var value = index + 1 < args.Length ? args[index + 1] : null;
+            switch (option)
+            {
+                case "--name": name = RequireValue(option, value); index++; break;
+                case "--output": output = RequireValue(option, value); index++; break;
+                case "--profile": profile = RequireValue(option, value); index++; break;
+                case "--source": source = RequireValue(option, value); index++; break;
+                default: throw new ArgumentException($"Unknown or unsupported option '{option}'.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(output))
+            throw new ArgumentException("new requires --name <display-name> and --output <directory>.");
+        return new NewWorkspaceCliOptions(name, output, profile, source);
+    }
+
     private static IndustryPackScaffoldOptions ParseIndustryPackAddOptions(string[] args)
     {
         string? name = null;
@@ -287,6 +397,74 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
             displayName ?? name + " Pack",
             description ?? $"Optional {name} publishing extensions for OpenPortalKit.",
             output);
+    }
+
+    private static ModuleAddCliOptions ParseModuleAddOptions(string[] args)
+    {
+        string? name = null;
+        string? area = null;
+        string? description = null;
+        string? root = null;
+        var ownsBusinessState = false;
+        IReadOnlyList<string> publicOutputs = Array.Empty<string>();
+
+        for (var index = 0; index < args.Length; index++)
+        {
+            var option = args[index];
+            var value = index + 1 < args.Length ? args[index + 1] : null;
+            switch (option)
+            {
+                case "--name": name = RequireValue(option, value); index++; break;
+                case "--area": area = RequireValue(option, value); index++; break;
+                case "--description": description = RequireValue(option, value); index++; break;
+                case "--root": root = RequireValue(option, value); index++; break;
+                case "--owns-state":
+                    if (!bool.TryParse(RequireValue(option, value), out ownsBusinessState))
+                        throw new ArgumentException("--owns-state must be 'true' or 'false'.");
+                    index++;
+                    break;
+                case "--public-outputs":
+                    var outputValue = RequireValue(option, value);
+                    publicOutputs = outputValue.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        ? Array.Empty<string>()
+                        : outputValue.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    index++;
+                    break;
+                default: throw new ArgumentException($"Unknown or unsupported option '{option}'.");
+            }
+        }
+
+        if (new[] { name, area, description }.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("module add requires --name, --area, and --description.");
+        return new ModuleAddCliOptions(name!, area!, description!, ownsBusinessState, publicOutputs, root);
+    }
+
+    private static UpgradeInspectCliOptions ParseUpgradeInspectOptions(string[] args)
+    {
+        string? root = null;
+        string? source = null;
+        var format = "text";
+        for (var index = 0; index < args.Length; index++)
+        {
+            var option = args[index];
+            var value = index + 1 < args.Length ? args[index + 1] : null;
+            switch (option)
+            {
+                case "--root": root = RequireValue(option, value); index++; break;
+                case "--source": source = RequireValue(option, value); index++; break;
+                case "--format":
+                    format = RequireValue(option, value).ToLowerInvariant();
+                    if (format is not ("text" or "json"))
+                        throw new ArgumentException("--format must be 'text' or 'json'.");
+                    index++;
+                    break;
+                default: throw new ArgumentException($"Unknown or unsupported option '{option}'.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(source))
+            throw new ArgumentException("upgrade inspect requires --root <workspace> and --source <candidate-repository>.");
+        return new UpgradeInspectCliOptions(root, source, format);
     }
 
     private static LegacyImportOptions ParseLegacyImportOptions(string[] args)
@@ -346,6 +524,10 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
         _output.WriteLine("OpenPortalKit developer CLI");
         _output.WriteLine();
         _output.WriteLine("Usage:");
+        _output.WriteLine("  opk new --name <display-name> --output <directory> [--profile corporate|data|research|activity|finance] [--source <repository>]");
+        _output.WriteLine("  opk module add --name <PascalCaseName> --area <slug> --description <text> [--owns-state true|false] [--public-outputs HTML,Markdown,JSON,Sitemap,RSS,Search,AgentSEO|none] [--root <repository>]");
+        _output.WriteLine("  opk template pack --output <archive.opkt> [--source <repository>]");
+        _output.WriteLine("  opk upgrade inspect --root <workspace> --source <candidate-repository> [--format text|json]");
         _output.WriteLine("  opk check-boundaries [--root <path>] [--format text|json]");
         _output.WriteLine("  opk check-agent-readiness [--root <path>] [--format text|json]");
         _output.WriteLine("  opk check-agent-readiness --url <https://site> [--timeout <seconds>] [--format text|json]");
@@ -362,6 +544,25 @@ public sealed class CliApplication(TextWriter output, TextWriter error)
         string? Url,
         string Format,
         int TimeoutSeconds);
+
+    private sealed record NewWorkspaceCliOptions(
+        string Name,
+        string OutputPath,
+        string Profile,
+        string? SourceRoot);
+
+    private sealed record ModuleAddCliOptions(
+        string Name,
+        string Area,
+        string Description,
+        bool OwnsBusinessState,
+        IReadOnlyList<string> PublicOutputs,
+        string? Root);
+
+    private sealed record UpgradeInspectCliOptions(
+        string Root,
+        string Source,
+        string Format);
 
     private sealed record IndustryPackCliOptions(
         string Path,

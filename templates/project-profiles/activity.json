@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.project-template-profile.v1",
+  "id": "activity",
+  "version": "1.0.0",
+  "defaultSite": "activity",
+  "selectedIndustryPacks": []
+}

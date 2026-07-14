@@ -3485,6 +3485,65 @@ core remains finance-neutral
 
 
 
+\# R13 — Project Scaffolding + Source Distribution
+
+
+\*\*Status: complete.\*\* Batch 1 provides a product-grade `opk new` command that creates a complete,
+traceable, independently buildable source workspace from an OpenPortalKit release checkout. Batch 2 adds
+transactional, boundary-checked `opk module add` authoring with generated contract tests and solution registration.
+Batch 3 adds strict versioned project profiles and read-only provenance-based upgrade inspection.
+Batch 4 closes R13 with verified portable source-template archives for repository-independent project creation.
+
+
+\## Goal
+
+
+Make OpenPortalKit practical as a framework that organizations customize, rather than distributing one fixed
+precompiled portal application.
+
+
+\## Project Creation
+
+
+```txt
+
+opk new --name <display-name> --output <directory> --profile corporate|data|research|activity|finance
+
+```
+
+
+Generated workspaces must preserve module boundaries, migrations, tests, public-output contracts, deployment tools,
+and source provenance. Generation must exclude secrets and local/build state, refuse overwrite, and complete
+atomically. Industry-specific selections remain in their matching packs.
+
+
+\## Extension Authoring
+
+
+R13 authoring surfaces:
+
+
+```txt
+
+opk module add (implemented)
+
+opk industry-pack add (implemented)
+
+versioned project profiles (implemented)
+
+source template archives (implemented)
+
+upgrade inspection (implemented)
+
+```
+
+
+The project generator must not become a low-code platform, arbitrary merge engine, or business-domain generator.
+
+
+\---
+
+
 \# 7. Testing Strategy
 
 

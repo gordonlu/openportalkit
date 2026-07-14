@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "opk.project-template-profile.v1",
+  "id": "corporate",
+  "version": "1.0.0",
+  "defaultSite": "corporate",
+  "selectedIndustryPacks": []
+}

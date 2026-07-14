@@ -1,3 +1,4 @@
-# Research Portal Template
+# Research Project Profile
 
-Placeholder for a research and insight publishing portal template.
+Use `opk new --profile research` for publications, methods, supporting datasets, and citable AgentSEO outputs.
+Research terminology belongs to site content and configuration, not generic core entities.

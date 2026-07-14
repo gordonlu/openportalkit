@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "opk.project-template-profile.v1",
+  "id": "finance",
+  "version": "1.0.0",
+  "defaultSite": "finance",
+  "selectedIndustryPacks": [
+    "Finance"
+  ]
+}

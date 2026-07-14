@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "opk.project-profile.v2",
+  "projectName": "OpenPortalKit Examples",
+  "defaultSite": "corporate",
+  "profileTemplate": {
+    "id": "corporate",
+    "version": "1.0.0",
+    "checksum": "development"
+  },
+  "selectedIndustryPacks": []
+}

@@ -82,6 +82,10 @@ Build the solution once, then run the repository checks through the cross-platfo
 
 ```bash
 ./tools/opk --help
+./tools/opk new --name "Atlas Public Portal" --profile data --output ../atlas-public-portal
+./tools/opk template pack --source . --output /tmp/openportalkit.opkt
+./tools/opk module add --name Announcements --area publishing-support --description "Reusable announcement delivery contracts." --public-outputs JSON,Markdown
+./tools/opk upgrade inspect --root ../atlas-public-portal --source .
 ./tools/opk check-boundaries
 ./tools/opk check-agent-readiness
 ./tools/opk check-agent-readiness --url https://portal.example.com
@@ -150,6 +154,7 @@ R9 Block Template System notes are in `docs/r9-block-template-system.md`.
 R10 Industry Pack System notes are in `docs/r10-industry-pack-system.md`.
 R11 production hardening notes are in `docs/r11-production-hardening.md`.
 R12 stabilization status and the 1.0 acceptance matrix are in `docs/r12-developer-experience.md`.
+R13 source workspace scaffolding is documented in `docs/r13-project-scaffolding.md`.
 
 ## Product Boundary
 

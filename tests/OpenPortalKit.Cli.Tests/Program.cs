@@ -1,5 +1,7 @@
 using System.Net;
+using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using OpenPortalKit.Cli;
 using OpenPortalKit.Cli.Checks;
 
@@ -14,7 +16,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("CLI validates industry packs through the shared contract", CliValidatesIndustryPack),
     ("CLI scaffolds a valid industry pack without overwriting", CliScaffoldsIndustryPack),
     ("CLI produces a traceable legacy dry-run report", CliProducesLegacyDryRunReport),
-    ("CLI blocks unsafe legacy rows", CliBlocksUnsafeLegacyRows)
+    ("CLI blocks unsafe legacy rows", CliBlocksUnsafeLegacyRows),
+    ("CLI creates a traceable source workspace", CliCreatesTraceableSourceWorkspace),
+    ("workspace scaffolding rejects unsafe sources and destinations", WorkspaceScaffoldingRejectsUnsafePaths),
+    ("project profiles reject malformed or unresolved manifests", ProjectProfilesRejectInvalidManifests),
+    ("offline template archives verify provenance and reject traversal", OfflineTemplateArchivesAreVerified),
+    ("repository workspace scaffold preserves product boundaries", RepositoryWorkspaceScaffoldPreservesBoundaries)
 };
 
 var failed = 0;
@@ -42,6 +49,9 @@ static async Task CliExposesStableHelpAndUsageErrors()
 
     Assert(await application.RunAsync(["--help"]) == 0, "Help should succeed.");
     Assert(output.ToString().Contains("check-agent-readiness", StringComparison.Ordinal), "Help omitted a command.");
+    Assert(output.ToString().Contains("opk new", StringComparison.Ordinal), "Help omitted project scaffolding.");
+    Assert(output.ToString().Contains("opk module add", StringComparison.Ordinal), "Help omitted module scaffolding.");
+    Assert(output.ToString().Contains("opk upgrade inspect", StringComparison.Ordinal), "Help omitted upgrade inspection.");
     Assert(await application.RunAsync(["unknown"]) == 2, "Unknown commands should return usage exit code 2.");
 }
 
@@ -226,6 +236,296 @@ static async Task CliBlocksUnsafeLegacyRows()
     }
 }
 
+static async Task CliCreatesTraceableSourceWorkspace()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var source = CreateWorkspaceTemplate(Path.Combine(root, "template"));
+        var outputPath = Path.Combine(root, "generated");
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var application = new CliApplication(output, error);
+
+        var exitCode = await application.RunAsync([
+            "new", "--name", "Atlas Investor Information", "--profile", "finance",
+            "--output", outputPath, "--source", source
+        ]);
+
+        Assert(exitCode == 0, error.ToString());
+        Assert(File.Exists(Path.Combine(outputPath, "OpenPortalKit.sln")), "Solution was not copied.");
+        Assert(File.Exists(Path.Combine(outputPath, "docker", ".env.example")), "Safe environment example was not copied.");
+        Assert(!File.Exists(Path.Combine(outputPath, "docker", ".env")), "Environment secrets were copied.");
+        Assert(!Directory.Exists(Path.Combine(outputPath, "src", "bin")), "Build outputs were copied.");
+        Assert(!Directory.Exists(Path.Combine(outputPath, "apps", "web", "node_modules")), "Node dependencies were copied.");
+
+        using var project = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(outputPath, "openportalkit.project.json")));
+        var projectRoot = project.RootElement;
+        Assert(projectRoot.GetProperty("schemaVersion").GetString() == "opk.project.v2", "Project schema is missing.");
+        Assert(projectRoot.GetProperty("profile").GetProperty("id").GetString() == "finance",
+            "Versioned project profile id is missing.");
+        Assert(projectRoot.GetProperty("profile").GetProperty("version").GetString() == "1.0.0",
+            "Versioned project profile version is missing.");
+        Assert(projectRoot.GetProperty("profile").GetProperty("checksum").GetString()?.Length == 64,
+            "Versioned project profile checksum is missing.");
+        Assert(projectRoot.GetProperty("source").GetProperty("checksum").GetString()?.Length == 64,
+            "Template checksum is missing.");
+        Assert(projectRoot.GetProperty("selectedIndustryPacks")[0].GetString() == "Finance",
+            "Finance selection was not kept outside core configuration.");
+
+        using var profile = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(outputPath, "apps", "web", "src", "lib", "project-profile.json")));
+        Assert(profile.RootElement.GetProperty("projectName").GetString() == "Atlas Investor Information",
+            "Generated Web branding is incorrect.");
+        Assert(profile.RootElement.GetProperty("defaultSite").GetString() == "finance",
+            "Generated Web profile is incorrect.");
+        Assert(profile.RootElement.GetProperty("profileTemplate").GetProperty("version").GetString() == "1.0.0",
+            "Generated Web profile provenance is missing.");
+        Assert(await application.RunAsync([
+            "new", "--name", "Duplicate", "--output", outputPath, "--source", source
+        ]) == 2, "Existing output should not be overwritten.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task WorkspaceScaffoldingRejectsUnsafePaths()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var source = CreateWorkspaceTemplate(Path.Combine(root, "template"));
+        var application = new CliApplication(new StringWriter(), new StringWriter());
+        Assert(await application.RunAsync([
+            "new", "--name", "Nested Portal", "--output", Path.Combine(source, "generated"), "--source", source
+        ]) == 2, "Output nested in the source should be rejected.");
+        Assert(await application.RunAsync([
+            "new", "--name", "Bad Profile", "--profile", "trading", "--output", Path.Combine(root, "bad"), "--source", source
+        ]) == 2, "Unknown profiles should be rejected.");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            var outside = Path.Combine(root, "outside.txt");
+            await File.WriteAllTextAsync(outside, "outside");
+            File.CreateSymbolicLink(Path.Combine(source, "src", "linked.txt"), outside);
+            Assert(await application.RunAsync([
+                "new", "--name", "Linked Portal", "--output", Path.Combine(root, "linked"), "--source", source
+            ]) == 2, "Symbolic links in the template should be rejected.");
+            Assert(!Directory.Exists(Path.Combine(root, "linked")), "Failed scaffolding left a partial workspace.");
+        }
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task ProjectProfilesRejectInvalidManifests()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var source = CreateWorkspaceTemplate(Path.Combine(root, "template"));
+        var profilePath = Path.Combine(source, "templates", "project-profiles", "finance.json");
+        var catalog = new OpenPortalKit.Cli.Authoring.ProjectProfileCatalog();
+
+        await File.WriteAllTextAsync(profilePath, """
+            {
+              "schemaVersion": "opk.project-template-profile.v1",
+              "id": "finance",
+              "version": "1.0.0",
+              "defaultSite": "finance",
+              "selectedIndustryPacks": ["Finance"],
+              "unexpected": true
+            }
+            """);
+        await AssertThrowsAsync<FormatException>(() => catalog.LoadAsync(source, "finance"),
+            "Unknown profile properties should fail closed.");
+
+        await File.WriteAllTextAsync(profilePath, ProjectProfile("finance", "MissingPack"));
+        await AssertThrowsAsync<FormatException>(() => catalog.LoadAsync(source, "finance"),
+            "Missing industry pack references should fail closed.");
+
+        await File.WriteAllTextAsync(profilePath, ProjectProfile("finance").Replace("1.0.0", "v1"));
+        await AssertThrowsAsync<FormatException>(() => catalog.LoadAsync(source, "finance"),
+            "Invalid profile semantic versions should fail closed.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task OfflineTemplateArchivesAreVerified()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var source = CreateWorkspaceTemplate(Path.Combine(root, "template"));
+        var archivePath = Path.Combine(root, "release.opkt");
+        var archive = new OpenPortalKit.Cli.Authoring.TemplateArchive();
+        var packed = await archive.PackAsync(source, archivePath);
+        Assert(packed.FileCount > 5 && packed.SourceChecksum.Length == 64 && packed.ArchiveChecksum.Length == 64,
+            "Template archive provenance is incomplete.");
+
+        var outputPath = Path.Combine(root, "offline-workspace");
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exitCode = await new CliApplication(output, error).RunAsync([
+            "new", "--name", "Offline Portal", "--profile", "finance",
+            "--output", outputPath, "--source", archivePath
+        ]);
+        Assert(exitCode == 0, error.ToString());
+        using var project = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(outputPath, "openportalkit.project.json")));
+        Assert(project.RootElement.GetProperty("source").GetProperty("checksum").GetString() == packed.SourceChecksum,
+            "Offline generation did not preserve archive source provenance.");
+
+        var tamperedPath = Path.Combine(root, "tampered.opkt");
+        File.Copy(archivePath, tamperedPath);
+        using (var zip = ZipFile.Open(tamperedPath, ZipArchiveMode.Update))
+        {
+            zip.GetEntry("opk-template.json")!.Delete();
+            var unsafeEntry = zip.CreateEntry("../escape.txt");
+            await using (var writer = new StreamWriter(unsafeEntry.Open())) await writer.WriteAsync("escape");
+            var manifestEntry = zip.CreateEntry("opk-template.json");
+            await using var manifestStream = manifestEntry.Open();
+            await JsonSerializer.SerializeAsync(manifestStream, new
+            {
+                schemaVersion = "opk.source-template-archive.v1",
+                templateVersion = OpenPortalKit.Cli.Authoring.WorkspaceScaffolder.TemplateVersion,
+                createdAt = DateTimeOffset.UtcNow,
+                sourceChecksum = packed.SourceChecksum,
+                fileCount = packed.FileCount + 1
+            });
+        }
+        await AssertThrowsAsync<FormatException>(() => archive.ExtractAsync(tamperedPath),
+            "Archive path traversal should fail closed.");
+        Assert(!File.Exists(Path.Combine(root, "escape.txt")), "Unsafe archive entry escaped extraction root.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task RepositoryWorkspaceScaffoldPreservesBoundaries()
+{
+    var outputPath = Path.Combine(Path.GetTempPath(), "opk-cli-tests", Guid.NewGuid().ToString("N"), "workspace");
+    try
+    {
+        var result = await new OpenPortalKit.Cli.Authoring.WorkspaceScaffolder().CreateAsync(
+            new OpenPortalKit.Cli.Authoring.WorkspaceScaffoldOptions(
+                "Boundary Fixture", "corporate", outputPath, FindRepositoryRoot()));
+        Assert(result.FileCount > 400 && result.SourceChecksum.Length == 64,
+            "Repository workspace inventory is incomplete.");
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var application = new CliApplication(output, error);
+        var addExitCode = await application.RunAsync([
+            "module", "add", "--name", "Announcements", "--area", "publishing-support",
+            "--description", "Coordinates reusable announcement delivery contracts.",
+            "--owns-state", "false", "--public-outputs", "JSON,Markdown", "--root", outputPath
+        ]);
+        Assert(addExitCode == 0, error.ToString());
+        var moduleRoot = Path.Combine(outputPath, "src", "OpenPortalKit.Modules.Announcements");
+        var testRoot = Path.Combine(outputPath, "tests", "OpenPortalKit.Modules.Announcements.Tests");
+        Assert(File.Exists(Path.Combine(moduleRoot, "AnnouncementsModule.cs")), "Module descriptor was not generated.");
+        Assert(File.Exists(Path.Combine(testRoot, "Program.cs")), "Module contract tests were not generated.");
+        var descriptor = await File.ReadAllTextAsync(Path.Combine(moduleRoot, "AnnouncementsModule.cs"));
+        Assert(descriptor.Contains("new[] { \"JSON\", \"Markdown\" }", StringComparison.Ordinal),
+            "Public outputs were not normalized deterministically.");
+        var solution = await File.ReadAllTextAsync(Path.Combine(outputPath, "OpenPortalKit.sln"));
+        Assert(solution.Contains("OpenPortalKit.Modules.Announcements.Tests", StringComparison.Ordinal),
+            "Generated projects were not registered in the solution.");
+        Assert(await application.RunAsync([
+            "module", "add", "--name", "Announcements", "--area", "publishing-support",
+            "--description", "Duplicate module.", "--root", outputPath
+        ]) == 2, "Existing modules should not be overwritten.");
+
+        var solutionBeforeRejectedModule = await File.ReadAllBytesAsync(Path.Combine(outputPath, "OpenPortalKit.sln"));
+        Assert(await application.RunAsync([
+            "module", "add", "--name", "Finance", "--area", "publishing-support",
+            "--description", "Must remain in an industry pack.", "--root", outputPath
+        ]) == 2, "Industry-specific core modules should be rejected.");
+        Assert(!Directory.Exists(Path.Combine(outputPath, "src", "OpenPortalKit.Modules.Finance")),
+            "Rejected module source was not rolled back.");
+        var solutionAfterRejectedModule = await File.ReadAllBytesAsync(Path.Combine(outputPath, "OpenPortalKit.sln"));
+        Assert(solutionBeforeRejectedModule.SequenceEqual(solutionAfterRejectedModule),
+            "Rejected module changed the solution file.");
+
+        var report = new BoundaryChecker().Run(outputPath);
+        Assert(report.IsSuccessful,
+            string.Join("; ", report.Results.Where(item => item.Status == CheckStatus.Failed).Select(item => item.Message)));
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert(await application.RunAsync([
+            "upgrade", "inspect", "--root", outputPath, "--source", FindRepositoryRoot(), "--format", "json"
+        ]) == 0, error.ToString() + output);
+        Assert(output.ToString().Contains("\"Warnings\": 0", StringComparison.Ordinal),
+            "Unchanged source should produce a clean upgrade inspection.");
+
+        var projectManifestPath = Path.Combine(outputPath, "openportalkit.project.json");
+        var projectManifest = await File.ReadAllTextAsync(projectManifestPath);
+        projectManifest = projectManifest.Replace(
+            result.SourceChecksum,
+            new string('0', 64),
+            StringComparison.Ordinal);
+        await File.WriteAllTextAsync(projectManifestPath, projectManifest);
+        output.GetStringBuilder().Clear();
+        Assert(await application.RunAsync([
+            "upgrade", "inspect", "--root", outputPath, "--source", FindRepositoryRoot()
+        ]) == 0, "Source drift should be reported as a non-destructive warning.");
+        Assert(output.ToString().Contains("WARN OPK-UPG-003", StringComparison.Ordinal),
+            "Source provenance drift warning is missing.");
+    }
+    finally
+    {
+        var parent = Directory.GetParent(outputPath)?.FullName;
+        if (parent is not null && Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+    }
+}
+
+static string CreateWorkspaceTemplate(string root)
+{
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(Path.Combine(root, "src", "bin"));
+    Directory.CreateDirectory(Path.Combine(root, "apps", "web", "src", "lib"));
+    Directory.CreateDirectory(Path.Combine(root, "apps", "web", "node_modules", "package"));
+    Directory.CreateDirectory(Path.Combine(root, "db"));
+    Directory.CreateDirectory(Path.Combine(root, "tools"));
+    Directory.CreateDirectory(Path.Combine(root, "docker"));
+    Directory.CreateDirectory(Path.Combine(root, "templates", "project-profiles"));
+    Directory.CreateDirectory(Path.Combine(root, "industry-packs", "Finance"));
+    File.WriteAllText(Path.Combine(root, "OpenPortalKit.sln"), "solution");
+    File.WriteAllText(Path.Combine(root, "README.md"), "template readme");
+    File.WriteAllText(Path.Combine(root, "src", "Keep.cs"), "public class Keep { }");
+    File.WriteAllText(Path.Combine(root, "db", "README.md"), "database assets\n");
+    File.WriteAllText(Path.Combine(root, "src", "bin", "ignored.dll"), "ignored");
+    File.WriteAllText(Path.Combine(root, "apps", "web", "node_modules", "package", "ignored.js"), "ignored");
+    File.WriteAllText(Path.Combine(root, "docker", ".env"), "SECRET=do-not-copy");
+    File.WriteAllText(Path.Combine(root, "docker", ".env.example"), "SECRET=<set-me>");
+    File.WriteAllText(Path.Combine(root, "apps", "web", "src", "lib", "project-profile.json"), "{}\n");
+    File.WriteAllText(Path.Combine(root, "tools", "opk"), "#!/usr/bin/env bash\n");
+    File.WriteAllText(Path.Combine(root, "industry-packs", "Finance", "pack.json"), "{}\n");
+    File.WriteAllText(Path.Combine(root, "templates", "project-profiles", "corporate.json"), ProjectProfile("corporate"));
+    File.WriteAllText(Path.Combine(root, "templates", "project-profiles", "finance.json"), ProjectProfile("finance", "Finance"));
+    return root;
+}
+
+static string ProjectProfile(string id, params string[] packs) => JsonSerializer.Serialize(new
+{
+    schemaVersion = "opk.project-template-profile.v1",
+    id,
+    version = "1.0.0",
+    defaultSite = id,
+    selectedIndustryPacks = packs
+});
+
 static string CreateTestDirectory()
 {
     var path = Path.Combine(Path.GetTempPath(), "opk-cli-tests", Guid.NewGuid().ToString("N"));
@@ -248,6 +548,21 @@ static string FindRepositoryRoot()
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
+}
+
+static async Task AssertThrowsAsync<TException>(Func<Task> action, string message)
+    where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(message);
 }
 
 file sealed class AgentReadyHandler(bool crossOriginContent = false) : HttpMessageHandler
